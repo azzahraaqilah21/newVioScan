@@ -252,13 +252,23 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
       final clinicalData = ref.read(clinicalAssessmentProvider);
       final hwResult = ref.read(latestHardwareResultProvider);
 
-      final model = (hwResult ?? ScreeningModel.demo(
-            userId: user?.uid ?? 'offline_user',
-            lesionLocation: lesionInfo?.location ?? 'Lengan Kiri',
-            lesionNotes: lesionInfo?.notes,
-            clinicalRiskAssessment: clinicalData,
-            riskLevel: riskLevel,
-          ))
+      // Tanpa hasil dari alat, layar hanya menampilkan contoh per tingkat
+      // risiko — contoh itu tidak boleh tersimpan sebagai hasil skrining.
+      if (hwResult == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Belum ada hasil dari alat. Hasil contoh tidak disimpan.',
+              ),
+              backgroundColor: Color(0xFFD97706),
+            ),
+          );
+        }
+        return;
+      }
+
+      final model = hwResult
           // FIX: userId & info lesi dari form/auth WAJIB dipakai â€” sebelumnya
           // hasil hardware disimpan dengan userId 'local_patient' & lokasi
           // generik, sehingga riwayat/statistik user tidak pernah terisi.

@@ -89,6 +89,9 @@ class DeviceService {
   Timer? _scanTimeoutTimer;
   Timer? _prepareTimeoutTimer;
 
+  // Menunggu balasan 'shutting_down' / 'error' setelah perintah SHUTDOWN.
+  Completer<String?>? _shutdownCompleter;
+
   static const _scanTimeoutSeconds = 60;
   static const _prepareTimeoutSeconds = 15;
 
@@ -116,6 +119,11 @@ class DeviceService {
   DeviceInfo? _discoveredDevice;
 
   DeviceInfo? get foundDevice => _discoveredDevice;
+
+  /// Dipanggil saat user mengetuk perangkat di daftar.
+  void selectDevice(DeviceInfo device) {
+    _discoveredDevice = device;
+  }
 
   void _updateStatus(DeviceConnectionState state) {
     if (_disposed) return;
@@ -158,16 +166,30 @@ class DeviceService {
 
     try {
       // Android 12+ : izin runtime wajib diminta sebelum akses Bluetooth.
-      // Di Android <12 status ini 'denied/granted' tanpa efek (tidak diblokir).
+      // Di Android <12 status ini 'granted' otomatis (tidak diblokir).
+      // Lokasi WAJIB juga: plugin flutter_bluetooth_serial 0.4.0 menolak
+      // getBondedDevices() ("no_permissions") jika izin lokasi belum
+      // diberikan, di versi Android berapa pun.
       final statuses = await [
         Permission.bluetoothConnect,
         Permission.bluetoothScan,
+        Permission.locationWhenInUse,
       ].request();
+
       final connectStatus = statuses[Permission.bluetoothConnect];
-      if (connectStatus != null && connectStatus.isPermanentlyDenied) {
+      if (connectStatus != null && !connectStatus.isGranted) {
         throw Exception(
-          'Izin Bluetooth ditolak permanen. Aktifkan izin "Perangkat sekitar" '
-          'di Pengaturan > Aplikasi > izin.',
+          'Izin "Perangkat sekitar" belum diberikan. Buka Pengaturan > '
+          'Aplikasi > vioscan_flutter > Izin, lalu izinkan "Perangkat sekitar".',
+        );
+      }
+
+      final locationStatus = statuses[Permission.locationWhenInUse];
+      if (locationStatus != null && !locationStatus.isGranted) {
+        throw Exception(
+          'Izin Lokasi belum diberikan. Plugin Bluetooth membutuhkan izin '
+          'Lokasi untuk membaca daftar perangkat yang dipasangkan. Buka '
+          'Pengaturan > Aplikasi > vioscan_flutter > Izin > Lokasi.',
         );
       }
 
@@ -184,7 +206,11 @@ class DeviceService {
         }
       }
 
-      final bondedDevices = await bluetooth.getBondedDevices();
+      // Timeout: di beberapa HP callback izin plugin tidak pernah kembali
+      // sehingga Future menggantung dan UI loading selamanya.
+      final bondedDevices = await bluetooth
+          .getBondedDevices()
+          .timeout(const Duration(seconds: 10));
 
       final devices = bondedDevices.map((device) {
         final address = device.address;
@@ -204,18 +230,33 @@ class DeviceService {
         return name.contains('bccare') || name.contains('bc care');
       }).toList();
 
-      final discoveredDevices =
-          bcCareDevices.isNotEmpty ? bcCareDevices : devices;
+      // Tampilkan SEMUA perangkat terpasang, perangkat BC-Care di atas.
+      // Pilih otomatis hanya jika namanya cocok; selain itu user memilih
+      // sendiri (nama Bluetooth Pi bawaan = hostname, mis. 'raspberrypi',
+      // sehingga mengambil .first bisa nyasar ke TWS/smartwatch).
+      final discoveredDevices = [
+        ...bcCareDevices,
+        ...devices.where((d) => !bcCareDevices.contains(d)),
+      ];
 
       _devicesController.add(discoveredDevices);
+      if (bcCareDevices.isNotEmpty) {
+        _discoveredDevice = bcCareDevices.first;
+      }
+
+      // Pi belum ter-pair (pairing bisa gagal karena Pi tidak punya agent
+      // untuk konfirmasi passkey) → cari lewat discovery. Koneksinya nanti
+      // memakai socket insecure di plugin, jadi tidak perlu pairing.
+      if (bcCareDevices.isEmpty) {
+        await _discoverUnpairedBcCare(bluetooth, discoveredDevices);
+      }
 
       if (discoveredDevices.isNotEmpty) {
-        _discoveredDevice = discoveredDevices.first;
         _updateStatus(DeviceConnectionState.disconnected);
       } else {
         _lastErrorMessage =
-            'Tidak ada perangkat Bluetooth yang sudah dipasangkan. '
-            'Pasangkan HP dengan Raspberry Pi melalui pengaturan Bluetooth Android.';
+            'Perangkat BC-Care tidak ditemukan. Pastikan Raspberry Pi menyala '
+            'dan berada dekat HP, lalu tekan Cari Bluetooth Lagi.';
         _updateStatus(DeviceConnectionState.error);
       }
     } catch (e) {
@@ -224,16 +265,69 @@ class DeviceService {
       _discoveredDevice = null;
       _devicesController.add([]);
 
-      _lastErrorMessage =
-          'Tidak dapat mencari perangkat Bluetooth. '
-          'Pastikan Bluetooth aktif, izin diberikan, dan Raspberry Pi '
-          'sudah dipasangkan dengan HP.\nDetail: $e';
+      _lastErrorMessage = e is TimeoutException
+          ? 'Daftar perangkat Bluetooth tidak merespons. Pastikan izin '
+              'Lokasi & Perangkat sekitar diberikan, lalu coba lagi.'
+          : e.toString().replaceFirst('Exception: ', '');
 
       _updateStatus(DeviceConnectionState.error);
     }
   }
 
+  static const _discoveryTimeoutSeconds = 12;
+
+  StreamSubscription<BluetoothDiscoveryResult>? _discoverySubscription;
+
+  /// Discovery Bluetooth Classic untuk perangkat BC-Care yang BELUM di-pair.
+  /// Hasil yang cocok ditambahkan ke [list] (di posisi teratas) dan dipilih
+  /// otomatis. Selesai saat discovery berakhir atau timeout.
+  Future<void> _discoverUnpairedBcCare(
+    FlutterBluetoothSerial bluetooth,
+    List<DeviceInfo> list,
+  ) async {
+    final done = Completer<void>();
+
+    await _discoverySubscription?.cancel();
+    _discoverySubscription = bluetooth.startDiscovery().listen(
+      (result) {
+        final name = result.device.name?.trim() ?? '';
+        final normalized = name.toLowerCase().replaceAll('-', '');
+        final isBcCare =
+            normalized.contains('bccare') || normalized.contains('bc care');
+        if (!isBcCare || list.any((d) => d.id == result.device.address)) {
+          return;
+        }
+
+        final device = DeviceInfo(
+          id: result.device.address,
+          name: name,
+          isBonded: result.device.isBonded,
+        );
+        list.insert(0, device);
+        _discoveredDevice ??= device;
+        if (!_disposed) _devicesController.add(List.of(list));
+        debugPrint('[BT] Ditemukan via discovery: $name (${device.id})');
+      },
+      onError: (Object e) {
+        debugPrint('[BT] Discovery gagal: $e');
+        if (!done.isCompleted) done.complete();
+      },
+      onDone: () {
+        if (!done.isCompleted) done.complete();
+      },
+    );
+
+    await done.future.timeout(
+      const Duration(seconds: _discoveryTimeoutSeconds),
+      onTimeout: () {},
+    );
+    await _discoverySubscription?.cancel();
+    _discoverySubscription = null;
+  }
+
   void stopScan() {
+    _discoverySubscription?.cancel();
+    _discoverySubscription = null;
     if (_currentState == DeviceConnectionState.scanning) {
       _updateStatus(DeviceConnectionState.disconnected);
     }
@@ -260,7 +354,10 @@ class DeviceService {
 
       final connection =
           await BluetoothConnection.toAddress(device.id)
-              .timeout(const Duration(seconds: 15));
+              // 45 detik: koneksi ke Pi yang belum di-pair memicu
+              // permintaan pairing di sisi Pi (timeout agent BlueZ ±30 dtk);
+              // beri waktu orang di Pi menekan "Terima".
+              .timeout(const Duration(seconds: 45));
 
       _connection = connection;
       _receiveTail = <int>[];
@@ -323,6 +420,7 @@ class DeviceService {
     _cancelScanTimeout();
     _cancelPrepareTimeout();
     _setPrepared(false);
+    _completeShutdown('Koneksi terputus sebelum alat mengonfirmasi.');
 
     await _closeConnection();
 
@@ -430,6 +528,51 @@ class DeviceService {
     await Future.delayed(const Duration(milliseconds: 400));
     _setPrepared(true);
     _updateStatus(DeviceConnectionState.connected);
+  }
+
+  // ------------------------------------------------------------
+  // SHUTDOWN (matikan Raspberry Pi)
+  // ------------------------------------------------------------
+
+  /// Minta Raspberry Pi mematikan diri (setara tahan tombol fisik 8 detik).
+  /// Return null jika Pi mengonfirmasi 'shutting_down', atau pesan error.
+  Future<String?> sendShutdownCommand() async {
+    if (_currentState != DeviceConnectionState.connected &&
+        _currentState != DeviceConnectionState.done) {
+      return 'Alat belum terhubung atau sedang memindai.';
+    }
+
+    // Simulasi: tidak ada alat sungguhan yang perlu dimatikan.
+    if (_connection == null) {
+      await disconnect();
+      return null;
+    }
+
+    final completer = Completer<String?>();
+    _shutdownCompleter = completer;
+
+    await sendCommand(jsonEncode({'command': 'SHUTDOWN'}));
+    if (_currentState == DeviceConnectionState.error) {
+      _completeShutdown(
+        _lastErrorMessage ?? 'Gagal mengirim perintah ke alat.',
+      );
+    }
+
+    return completer.future.timeout(
+      const Duration(seconds: 8),
+      onTimeout: () {
+        _shutdownCompleter = null;
+        return 'Alat tidak mengonfirmasi perintah mematikan.';
+      },
+    );
+  }
+
+  void _completeShutdown(String? error) {
+    final completer = _shutdownCompleter;
+    _shutdownCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(error);
+    }
   }
 
   // ------------------------------------------------------------
@@ -610,6 +753,7 @@ class DeviceService {
               'Terjadi kesalahan pada alat.';
 
           _lastErrorMessage = errMsg;
+          _completeShutdown(errMsg);
           _updateStatus(DeviceConnectionState.error);
 
           debugPrint('[BT-RX] Error dari Raspberry Pi: $errMsg');
@@ -693,6 +837,11 @@ class DeviceService {
             '[BT-RX] Hasil: ${screening.prediction} '
             '(${screening.confidence.toStringAsFixed(1)}%)',
           );
+          break;
+
+        case 'shutting_down':
+          debugPrint('[BT-RX] Raspberry Pi sedang dimatikan.');
+          _completeShutdown(null);
           break;
 
         case 'scan_warning':

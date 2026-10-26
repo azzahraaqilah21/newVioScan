@@ -33,6 +33,12 @@ dependencies:
   flutter_bluetooth_serial: ^0.4.0
   permission_handler: ^11.3.1
 
+dependency_overrides:
+  # Patch lokal: versi pub.dev memakai jcenter() & tanpa namespace → gagal
+  # dibuild dengan Gradle 9 / AGP 9. Lihat third_party/flutter_bluetooth_serial.
+  flutter_bluetooth_serial:
+    path: third_party/flutter_bluetooth_serial
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

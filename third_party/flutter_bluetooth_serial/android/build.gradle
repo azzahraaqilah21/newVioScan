@@ -1,0 +1,27 @@
+// Salinan flutter_bluetooth_serial 0.4.0 yang di-patch agar bisa dibuild
+// dengan Gradle 9 / AGP 9: jcenter() dihapus (sudah tidak ada di Gradle 9),
+// buildscript AGP 4.1 dibuang (pakai AGP dari project), namespace ditambahkan.
+group 'io.github.edufolly.flutterbluetoothserial'
+version '1.0-SNAPSHOT'
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'io.github.edufolly.flutterbluetoothserial'
+    compileSdk 36
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    defaultConfig {
+        minSdk 21
+    }
+    lint {
+        disable 'InvalidPackage'
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+}

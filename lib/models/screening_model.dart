@@ -76,6 +76,7 @@ class ScreeningModel {
       'cnnModelVersion': cnnModelVersion,
       'createdAt': Timestamp.fromDate(createdAt),
       'userId': userId,
+      'isSimulated': isSimulated,
     };
   }
 
@@ -160,6 +161,7 @@ class ScreeningModel {
       cnnModelVersion: map['cnnModelVersion'] as String? ?? 'BCC-v3.2',
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       userId: map['userId'] as String? ?? '',
+      isSimulated: map['isSimulated'] == true,
     );
   }
 
@@ -302,6 +304,8 @@ class ScreeningModel {
       cnnModelVersion: 'BCC-v3.2',
       createdAt: DateTime.now(),
       userId: userId,
+      // Data contoh (Mode Simulator) — bukan hasil alat.
+      isSimulated: true,
     );
   }
 }

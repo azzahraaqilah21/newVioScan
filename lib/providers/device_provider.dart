@@ -42,22 +42,24 @@ class DeviceStatusNotifier
 
   void stopScan() => _service.stopScan();
 
-  /// Hubungkan hanya ke perangkat Bluetooth yang ditemukan.
-  /// Tidak menggunakan fallback alamat Wi-Fi.
-  Future<void> connect() async {
-    final device = _service.foundDevice;
+  /// Hubungkan ke perangkat yang dipilih user (atau yang terpilih otomatis).
+  Future<void> connect([DeviceInfo? device]) async {
+    final target = device ?? _service.foundDevice;
 
-    if (device == null) {
+    if (target == null) {
       throw StateError(
-        'Perangkat Bluetooth belum ditemukan. '
-        'Aktifkan Bluetooth dan tekan Cari Bluetooth Lagi.',
+        'Pilih perangkat Raspberry Pi dari daftar terlebih dahulu.',
       );
     }
 
-    await _service.connect(device);
+    _service.selectDevice(target);
+    await _service.connect(target);
   }
 
   Future<void> disconnect() => _service.disconnect();
+
+  /// Matikan Raspberry Pi. Return null jika alat mengonfirmasi, atau pesan error.
+  Future<String?> shutdownDevice() => _service.sendShutdownCommand();
 
   Future<void> sendPrepareScanCommand({
     String mode = 'uv',

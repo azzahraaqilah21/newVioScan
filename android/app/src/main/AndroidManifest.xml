@@ -12,6 +12,9 @@
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
+    <!-- Dibutuhkan plugin flutter_bluetooth_serial 0.4.0 untuk getBondedDevices() -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!-- Izin jaringan: tetap dipertahankan -->
     <uses-permission android:name="android.permission.INTERNET" />

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../providers/device_provider.dart';
 import '../providers/auth_provider.dart';
@@ -22,6 +23,10 @@ class HardwareConnectionScreen extends ConsumerStatefulWidget {
 class _HardwareConnectionScreenState
     extends ConsumerState<HardwareConnectionScreen> {
   bool _useSimulation = false;
+
+  /// Perangkat yang dipilih user dari daftar. Null → pakai pilihan otomatis
+  /// DeviceService (perangkat bernama BC-Care), jika ada.
+  DeviceInfo? _selectedDevice;
 
   @override
   void initState() {
@@ -55,7 +60,11 @@ class _HardwareConnectionScreenState
   }
 
   Future<void> _connectToDevice() async {
-    await ref.read(deviceStatusProvider.notifier).connect();
+    final device =
+        _selectedDevice ?? ref.read(deviceServiceProvider).foundDevice;
+    if (device == null) return;
+
+    await ref.read(deviceStatusProvider.notifier).connect(device);
 
     if (!mounted) return;
 
@@ -70,7 +79,51 @@ class _HardwareConnectionScreenState
     await ref.read(deviceStatusProvider.notifier).disconnect();
   }
 
+  Future<void> _shutdownDevice() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Matikan alat?'),
+        content: const Text(
+          'Raspberry Pi akan dimatikan dengan aman. Untuk menyalakannya '
+          'lagi, cabut lalu colok kembali kabel daya alat.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Matikan',
+              style: TextStyle(color: Color(0xFFDC2626)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final error =
+        await ref.read(deviceStatusProvider.notifier).shutdownDevice();
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          error ??
+              'Alat sedang dimatikan. Tunggu ±20 detik sebelum mencabut daya.',
+        ),
+        backgroundColor:
+            error == null ? const Color(0xFF0A858C) : const Color(0xFFDC2626),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   void _rescan() {
+    setState(() => _selectedDevice = null);
     ref.read(deviceStatusProvider.notifier).startScan();
   }
 
@@ -98,6 +151,10 @@ class _HardwareConnectionScreenState
     final connectedDevice = ref.watch(
       deviceServiceProvider.select((service) => service.connectedDevice),
     );
+
+    final service = ref.read(deviceServiceProvider);
+    final selectedDevice = _selectedDevice ?? service.foundDevice;
+    final errorMessage = service.lastErrorMessage;
 
     final displayName = userAsync.when(
       data: (user) => user?.displayName ?? 'VioScan User',
@@ -380,6 +437,25 @@ class _HardwareConnectionScreenState
                         ),
                       ],
                     ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton.icon(
+                        onPressed: _shutdownDevice,
+                        icon: const Icon(
+                          Icons.power_settings_new_rounded,
+                          size: 16,
+                          color: Color(0xFF6B7280),
+                        ),
+                        label: const Text(
+                          'Matikan Alat',
+                          style: TextStyle(
+                            color: Color(0xFF6B7280),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
                   ] else ...[
                     InkWell(
                       onTap: () {
@@ -447,9 +523,12 @@ class _HardwareConnectionScreenState
             // Daftar perangkat Bluetooth yang sudah dipasangkan
             if (!isConnected)
               Expanded(
-                child: Center(
+                // Scrollable: daftar perangkat bisa panjang (semua perangkat
+                // ter-pair + hasil discovery) → tombol Hubungkan tidak boleh
+                // terdorong keluar layar.
+                child: SingleChildScrollView(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                    padding: const EdgeInsets.fromLTRB(28, 0, 28, 24),
                     child: probeAsync.when(
                       data: (devices) {
                         return Column(
@@ -478,24 +557,80 @@ class _HardwareConnectionScreenState
                             ),
                             const SizedBox(height: 12),
 
+                            // Error asli dari DeviceService (izin ditolak,
+                            // Bluetooth mati, dll.) — sebelumnya tidak pernah
+                            // tampil sehingga user hanya melihat list kosong.
+                            if (devices.isEmpty &&
+                                connState == DeviceConnectionState.error &&
+                                errorMessage != null) ...[
+                              Text(
+                                errorMessage,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Color(0xFFEF4444),
+                                  fontSize: 12,
+                                  height: 1.5,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextButton.icon(
+                                onPressed: openAppSettings,
+                                icon: const Icon(
+                                  Icons.settings_rounded,
+                                  size: 16,
+                                ),
+                                label: const Text('Buka Pengaturan Izin'),
+                              ),
+                            ],
+
+                            if (devices.isNotEmpty) ...[
+                              const Text(
+                                'Ketuk perangkat Raspberry Pi untuk memilih.',
+                                style: TextStyle(
+                                  color: Color(0xFF6B7280),
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+
                             if (devices.isNotEmpty)
-                              ...devices.map(
-                                (device) => Container(
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(),
+                                child: ListView(
+                                  shrinkWrap: true,
+                                  padding: EdgeInsets.zero,
+                                  physics:
+                                      const NeverScrollableScrollPhysics(),
+                                  children: devices.map((device) {
+                                final isSelected =
+                                    selectedDevice?.id == device.id;
+                                return GestureDetector(
+                                onTap: () =>
+                                    setState(() => _selectedDevice = device),
+                                child: Container(
                                   width: double.infinity,
                                   margin: const EdgeInsets.only(bottom: 8),
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF0FAFA),
+                                    color: isSelected
+                                        ? const Color(0xFFD5F2F2)
+                                        : const Color(0xFFF9FAFB),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: const Color(0xFFB9E4E4),
+                                      color: isSelected
+                                          ? const Color(0xFF0A858C)
+                                          : const Color(0xFFE5E7EB),
+                                      width: isSelected ? 2 : 1,
                                     ),
                                   ),
                                   child: Row(
                                     children: [
-                                      const Icon(
-                                        Icons.bluetooth_rounded,
-                                        color: Color(0xFF0A858C),
+                                      Icon(
+                                        isSelected
+                                            ? Icons.check_circle_rounded
+                                            : Icons.bluetooth_rounded,
+                                        color: const Color(0xFF0A858C),
                                       ),
                                       const SizedBox(width: 10),
                                       Expanded(
@@ -523,6 +658,9 @@ class _HardwareConnectionScreenState
                                     ],
                                   ),
                                 ),
+                                );
+                                  }).toList(),
+                                ),
                               ),
 
                             const SizedBox(height: 12),
@@ -531,7 +669,8 @@ class _HardwareConnectionScreenState
                               height: 52,
                               child: ElevatedButton.icon(
                                 onPressed: connState ==
-                                        DeviceConnectionState.connecting
+                                            DeviceConnectionState.connecting ||
+                                        selectedDevice == null
                                     ? null
                                     : _connectToDevice,
                                 icon: const Icon(
