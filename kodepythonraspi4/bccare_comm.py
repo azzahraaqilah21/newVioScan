@@ -430,13 +430,14 @@ class BCCareComm:
 
     def send_classification_result(
         self, disease, confidence, probabilities, mode, image_path,
-        ultrasonic_data=None, simulated=False
+        ultrasonic_data=None, simulated=False, analysis=None
     ):
         """
         Kirim paket hasil klasifikasi lengkap ke Android.
         Gambar dikompresi JPEG lalu di-encode base64 di dalam payload JSON.
         simulated=True → hasil BUKAN dari inferensi model nyata (fallback/simulasi);
         Android menampilkan disclaimer sesuai flag ini.
+        analysis → kualitas foto & waktu inferensi (lihat bccare_ml.analisis_citra).
         """
         img_b64 = ""
         if image_path and os.path.exists(image_path):
@@ -464,6 +465,7 @@ class BCCareComm:
             "ultrasonic": u_data,
             "image_base64": img_b64,
             "simulated": bool(simulated),
+            "analysis": analysis or {},
         }
 
         success = self.send_json(payload)

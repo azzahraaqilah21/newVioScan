@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'dart:math' as math;
 import '../providers/auth_provider.dart';
 import '../providers/screening_provider.dart';
 import '../providers/device_provider.dart';
@@ -29,6 +30,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
   bool _isSaved = false;
   bool _isSaving = false;
   late AnimationController _arcController;
+  late Animation<double> _arcAnimation;
 
   final Map<String, Map<String, dynamic>> riskConfig = {
     'low': {
@@ -192,6 +194,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     );
+    _arcAnimation = CurvedAnimation(parent: _arcController, curve: Curves.easeOut);
     _arcController.forward();
 
     // NOTE: ref.listen TIDAK boleh dipanggil di initState — Riverpod hanya
@@ -224,6 +227,57 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
       _isSaved = false;
     });
     _arcController.forward(from: 0);
+  }
+
+  /// Baris kartu "Analisis BC-Care" — semuanya data asli dari alat.
+  /// status: 'ok' (hijau), 'warn' (oranye), 'info' (abu-abu, tanpa penilaian).
+  /// Batas ketajaman/kecerahan diukur dari foto kamera Pi (lihat
+  /// analisis_citra di kodepythonraspi4/bccare_ml.py).
+  List<Map<String, String>> _analisisBcCare(ScreeningModel hw) {
+    final a = hw.analysisData ?? const <String, dynamic>{};
+    final isWhite = hw.mode == 'white';
+    final ms = a['inference_ms'];
+    final tajam = a['sharpness'];
+    final terang = a['brightness'];
+    return [
+      {'label': 'Cahaya', 'value': isWhite ? 'Putih' : 'UV', 'status': 'info'},
+      {
+        'label': 'Model AI',
+        'value': hw.isSimulated
+            ? 'Simulasi'
+            : isWhite
+                ? 'Dermoskopi'
+                : 'Fluoresensi UV',
+        'status': hw.isSimulated ? 'warn' : 'info',
+      },
+      {
+        'label': 'Waktu Inferensi',
+        'value': ms is num ? '${(ms / 1000).toStringAsFixed(1)} detik' : '—',
+        'status': 'info',
+      },
+      tajam is num
+          ? {
+              'label': 'Ketajaman Foto',
+              'value': tajam >= 50
+                  ? 'Tajam'
+                  : tajam >= 20
+                      ? 'Kurang tajam'
+                      : 'Buram',
+              'status': tajam >= 50 ? 'ok' : 'warn',
+            }
+          : {'label': 'Ketajaman Foto', 'value': '—', 'status': 'info'},
+      terang is num
+          ? {
+              'label': 'Pencahayaan Foto',
+              'value': terang < 30
+                  ? 'Terlalu gelap'
+                  : terang > 210
+                      ? 'Terlalu terang'
+                      : 'Cukup',
+              'status': terang < 30 || terang > 210 ? 'warn' : 'ok',
+            }
+          : {'label': 'Pencahayaan Foto', 'value': '—', 'status': 'info'},
+    ];
   }
 
   /// Keluar dari layar hasil. Hasil yang sudah disimpan baru dibersihkan di
@@ -372,6 +426,23 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     final rc = riskConfig[riskLevel]!;
     final reco = recommendations[riskLevel]!;
     final confidence = hwResult != null ? hwResult.confidence : (rc['confidence'] as double);
+    final confidenceText = '${confidence.toStringAsFixed(1)}%';
+    final analysis = hwResult != null ? _analisisBcCare(hwResult) : null;
+
+    // Distribusi probabilitas: keluaran model untuk hasil alat; angka contoh
+    // riskConfig hanya untuk skenario demo (tanpa hasil alat).
+    final probItems = hwResult != null
+        ? (hwResult.probabilities.entries.toList()
+              ..sort((a, b) => b.value.compareTo(a.value)))
+            .map((e) {
+            final isBcc = e.key.toUpperCase().contains('BCC');
+            return <String, dynamic>{
+              'name': isBcc ? 'Basal Cell Carcinoma' : 'Nevus / Kulit Normal',
+              'value': e.value,
+              'color': isBcc ? const Color(0xFFDC2626) : const Color(0xFF059669),
+            };
+          }).toList()
+        : List<Map<String, dynamic>>.from(rc['probabilities'] as List);
 
     // Tombol back HP = tombol kembali di layar (lihat _tinggalkanHasil).
     return PopScope(
@@ -751,7 +822,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                     borderRadius: BorderRadius.circular(100),
                                   ),
                                   child: Text(
-                                    '$confidence%',
+                                    confidenceText,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 12,
@@ -767,6 +838,165 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                     ),
                   ),
 
+                  // Keyakinan CNN + Analisis BC-Care (data asli dari alat)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Circular confidence gauge
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(10, 14, 10, 14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(22),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.06),
+                                blurRadius: 12,
+                                offset: const Offset(0, 2),
+                              )
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              // Keyakinan model pada hasil ini — bukan akurasi
+                              // model (akurasi diukur pada data uji).
+                              const Text(
+                                'Keyakinan CNN',
+                                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: 76,
+                                height: 76,
+                                child: AnimatedBuilder(
+                                  animation: _arcAnimation,
+                                  builder: (_, __) {
+                                    return CustomPaint(
+                                      painter: _ArcPainter(
+                                        value: _arcAnimation.value * confidence / 100,
+                                        color: rc['text'] as Color,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          confidenceText,
+                                          style: TextStyle(
+                                            color: rc['text'] as Color,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                confidence >= 90
+                                    ? 'Sangat yakin'
+                                    : confidence >= 70
+                                        ? 'Yakin'
+                                        : 'Ragu-ragu',
+                                style: TextStyle(
+                                  color: rc['text'] as Color,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Analysis summary
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(22),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.06),
+                                blurRadius: 12,
+                                offset: const Offset(0, 2),
+                              )
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  'Analisis BC-Care',
+                                  style: TextStyle(
+                                      color: Color(0xFF94A3B8), fontSize: 11),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              if (analysis == null)
+                                const Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    'Belum ada hasil dari alat.',
+                                    style: TextStyle(
+                                        color: Color(0xFF94A3B8), fontSize: 10),
+                                  ),
+                                )
+                              else
+                                ...analysis.asMap().entries.map((e) {
+                                  final i = e.key;
+                                  final item = e.value;
+                                  final dotColor = switch (item['status']) {
+                                    'ok' => const Color(0xFF22C55E),
+                                    'warn' => const Color(0xFFF59E0B),
+                                    _ => const Color(0xFFCBD5E1),
+                                  };
+                                  return Padding(
+                                    padding: EdgeInsets.only(
+                                      bottom: i < analysis.length - 1 ? 5 : 0,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            item['label']!,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                                color: Color(0xFF94A3B8), fontSize: 10),
+                                          ),
+                                        ),
+                                        Container(
+                                          width: 5,
+                                          height: 5,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: dotColor,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          item['value']!,
+                                          style: const TextStyle(
+                                            color: Color(0xFF374151),
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
                   // Disease Probabilities Distribution
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 300),
@@ -797,15 +1027,19 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                             ),
                           ),
                           const SizedBox(height: 4),
-                          const Text(
-                            'Prediksi AI berdasarkan analisis pola fluorosensi',
-                            style: TextStyle(
+                          Text(
+                            hwResult == null
+                                ? 'Contoh tampilan — belum ada hasil dari alat'
+                                : hwResult.mode == 'white'
+                                    ? 'Keluaran model Dermoskopi (cahaya putih)'
+                                    : 'Keluaran model Fluoresensi UV',
+                            style: const TextStyle(
                               color: Color(0xFF94A3B8),
                               fontSize: 10.5,
                             ),
                           ),
                           const SizedBox(height: 14),
-                          ...(rc['probabilities'] as List).map((prob) {
+                          ...probItems.map((prob) {
                             final val = prob['value'] as double;
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 10),
@@ -1272,6 +1506,41 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     ),
     );
   }
+}
+
+class _ArcPainter extends CustomPainter {
+  final double value;
+  final Color color;
+  _ArcPainter({required this.value, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 4;
+    final bgPaint = Paint()
+      ..color = const Color(0xFFF3F4F6)
+      ..strokeWidth = 7
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    final fgPaint = Paint()
+      ..color = color
+      ..strokeWidth = 7
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawCircle(center, radius, bgPaint);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -math.pi / 2,
+      value * 2 * math.pi,
+      false,
+      fgPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ArcPainter oldDelegate) =>
+      oldDelegate.value != value || oldDelegate.color != color;
 }
 
 /// Tile keterangan satu jenis penyakit kulit pada panel edukasi di layar hasil.

@@ -22,6 +22,7 @@ PENTING — Determinisme:
 
 import os
 import sys
+import time
 import numpy as np
 from PIL import Image
 
@@ -245,6 +246,7 @@ class BCCareClassifier:
                                         simulated=True)
 
         raw_score = None
+        t_mulai = time.monotonic()
 
         # 1. Inferensi via TFLite (mendukung float & quantized int8/uint8)
         if m_type == "tflite" and model is not None:
@@ -284,6 +286,8 @@ class BCCareClassifier:
             except Exception as e:
                 print(f"[ML] Error saat inferensi Keras: {e}")
 
+        inference_ms = round((time.monotonic() - t_mulai) * 1000)
+
         # 3. Fallback Simulasi Realistis (jika model belum di-deploy di testbed)
         if raw_score is None:
             raw_score = self._simulate_inference(image_path, mode_key)
@@ -318,6 +322,7 @@ class BCCareClassifier:
             "mode": mode_key,
             "raw_score": float(raw_score),
             "simulated": bool(simulated),
+            "inference_ms": inference_ms,
         }
 
     def _extract_score(self, out):
@@ -371,6 +376,30 @@ class BCCareClassifier:
 
 
 # Singleton instance
+def analisis_citra(image_path, lebar=512):
+    """
+    Ukur kualitas foto yang dipakai model (bukan diagnosis):
+      - brightness: rata-rata kecerahan 0–255
+      - sharpness : variansi Laplacian; foto fokus ±50–600, buram ±3–20
+    Diukur pada versi lebar 512 px agar nilainya tidak bergantung resolusi.
+    """
+    try:
+        img = Image.open(image_path).convert("L")
+        if img.width > lebar:
+            img = img.resize((lebar, round(img.height * lebar / img.width)),
+                             Image.Resampling.BILINEAR)
+        g = np.asarray(img, dtype=np.float32)
+        lap = (g[1:-1, :-2] + g[1:-1, 2:] + g[:-2, 1:-1] + g[2:, 1:-1]
+               - 4.0 * g[1:-1, 1:-1])
+        return {
+            "brightness": round(float(g.mean()), 1),
+            "sharpness": round(float(lap.var()), 1),
+        }
+    except Exception as e:
+        print(f"[ML] Gagal mengukur kualitas foto: {e}")
+        return {}
+
+
 _classifier_instance = None
 
 def get_classifier():

@@ -26,6 +26,8 @@ class ScreeningModel {
   // Hardware Ultrasonic Data
   final Map<String, dynamic>? ultrasonicData;
   final String? mode; // 'uv' or 'white'
+  // Analisis asli dari Pi: brightness, sharpness, inference_ms, model_type
+  final Map<String, dynamic>? analysisData;
 
   // Metadata
   final String cnnModelVersion;
@@ -51,6 +53,7 @@ class ScreeningModel {
     this.rawImageBytes,
     this.ultrasonicData,
     this.mode,
+    this.analysisData,
     required this.cnnModelVersion,
     required this.createdAt,
     required this.userId,
@@ -77,6 +80,7 @@ class ScreeningModel {
       'fluorescenceImageUrl': fluorescenceImageUrl,
       'ultrasonicData': ultrasonicData,
       'mode': mode,
+      'analysis': analysisData,
       'cnnModelVersion': cnnModelVersion,
       'createdAt': Timestamp.fromDate(createdAt),
       'userId': userId,
@@ -107,6 +111,7 @@ class ScreeningModel {
     Uint8List? rawImageBytes,
     Map<String, dynamic>? ultrasonicData,
     String? mode,
+    Map<String, dynamic>? analysisData,
     String? cnnModelVersion,
     DateTime? createdAt,
     String? userId,
@@ -130,6 +135,7 @@ class ScreeningModel {
       rawImageBytes: rawImageBytes ?? this.rawImageBytes,
       ultrasonicData: ultrasonicData ?? this.ultrasonicData,
       mode: mode ?? this.mode,
+      analysisData: analysisData ?? this.analysisData,
       cnnModelVersion: cnnModelVersion ?? this.cnnModelVersion,
       createdAt: createdAt ?? this.createdAt,
       userId: userId ?? this.userId,
@@ -178,6 +184,9 @@ class ScreeningModel {
           ? Map<String, dynamic>.from(map['ultrasonicData'] as Map)
           : null,
       mode: map['mode'] as String?,
+      analysisData: map['analysis'] is Map
+          ? Map<String, dynamic>.from(map['analysis'] as Map)
+          : null,
       cnnModelVersion: map['cnnModelVersion'] as String? ?? 'BCC-v3.2',
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       userId: map['userId'] as String? ?? '',
@@ -264,6 +273,9 @@ class ScreeningModel {
       rawImageBytes: imageBytes,
       ultrasonicData: uData,
       mode: json['mode'] as String? ?? 'uv',
+      analysisData: json['analysis'] is Map
+          ? Map<String, dynamic>.from(json['analysis'] as Map)
+          : null,
       cnnModelVersion: 'BC-Care Edge-AI (EfficientNetB3)',
       createdAt: DateTime.now(),
       userId: userId,

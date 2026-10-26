@@ -95,6 +95,31 @@ void main() {
       expect(dibaca.isSimulated, isFalse);
     });
 
+    test('Data Analisis BC-Care dari Pi ikut tersimpan & terbaca', () {
+      final model = ScreeningModel.fromDeviceJson(
+        {
+          'disease': 'NORMAL',
+          'confidence': 0.8,
+          'analysis': {
+            'brightness': 49.2,
+            'sharpness': 117.6,
+            'inference_ms': 1100,
+            'model_type': 'tflite',
+          },
+        },
+        userId: 'u1',
+      );
+      expect(model.analysisData!['sharpness'], equals(117.6));
+
+      final dibaca = ScreeningModel.fromMap('doc1', model.toMap());
+      expect(dibaca.analysisData!['inference_ms'], equals(1100));
+      expect(dibaca.analysisData!['brightness'], equals(49.2));
+
+      // Hasil lama (sebelum ada analisis) tetap terbaca tanpa error.
+      final lama = ScreeningModel.fromMap('doc2', {'riskLevel': 'low'});
+      expect(lama.analysisData, isNull);
+    });
+
     test('DeviceService simulation state machine flow', () async {
       final service = DeviceService();
       service.setSimulationMode(true);

@@ -30,7 +30,7 @@ import subprocess
 import threading
 
 from bccare_db import init_db, simpan_hasil_klasifikasi, simpan_hasil_ultrasonik
-from bccare_ml import get_classifier
+from bccare_ml import get_classifier, analisis_citra
 from bccare_comm import BCCareComm
 
 # ================================================================
@@ -489,6 +489,11 @@ def ambil_gambar():
         print(f"[ML] Hasil: {disease} ({confidence:.2%}) [model={model_type}] "
               f"{'(SIMULASI)' if is_simulated else ''}")
 
+        # Data asli untuk kartu "Analisis BC-Care" di aplikasi
+        analisis = analisis_citra(filename)
+        analisis["inference_ms"] = ml_result.get("inference_ms")
+        analisis["model_type"] = model_type
+
         # Mode simulasi ML → beri tahu Android hasil ini bukan inferensi nyata.
         if is_simulated:
             comm.send_json({"type": "scan_warning",
@@ -521,6 +526,7 @@ def ambil_gambar():
             image_path=filename,
             ultrasonic_data=terakhir_ultrasonik,
             simulated=is_simulated,
+            analysis=analisis,
         )
 
         return ml_result
