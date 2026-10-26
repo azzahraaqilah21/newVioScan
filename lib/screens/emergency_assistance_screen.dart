@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../widgets/bottom_nav.dart';
 
 class EmergencyAssistanceScreen extends StatefulWidget {
@@ -15,12 +16,31 @@ class _EmergencyAssistanceScreenState extends State<EmergencyAssistanceScreen>
   late AnimationController _borderController;
   late Animation<Color?> _borderAnimation;
 
+  // Nomor dicek 26 Okt 2026 dari sumber resmi:
+  // 119 — PSC/SPGDT Kemenkes (kemkes.go.id), 1500-567 — Halo Kemenkes
+  // (kemkes.go.id/layanan/halo-kemenkes; jam dari dokumen GRM JKN 2025),
+  // YKI — situs yayasankankerindonesia.org (Sekretariat YKI Pusat).
+  // Ketuk baris → aplikasi telepon dengan nomor terisi ('dial').
   final List<Map<String, dynamic>> hotlines = [
-    {'name': 'Gawat Darurat Medis', 'number': '119', 'available': '24 Jam / 7 Hari', 'category': 'Darurat', 'color': const Color(0xFFDC2626), 'bg': const Color(0xFFFEF2F2)},
-    {'name': 'Yayasan Kanker Indonesia', 'number': '1500-331', 'available': 'Sen–Jum 08:00–17:00', 'category': 'Onkologi', 'color': const Color(0xFFD97706), 'bg': const Color(0xFFFFFBEB)},
-    {'name': 'Poli Kulit RSUD / RS Rujukan', 'number': '(021) 500-135', 'available': 'Sen–Sab 08:00–15:00', 'category': 'Dermatologi', 'color': const Color(0xFF0A858C), 'bg': const Color(0xFFE6F7F7)},
-    {'name': 'Hotline Kesehatan Kemenkes RI', 'number': '1500-567', 'available': 'Sen–Jum 07:00–21:00', 'category': 'Kesehatan Kulit', 'color': const Color(0xFF7C3AED), 'bg': const Color(0xFFF5F3FF)},
+    {'name': 'Gawat Darurat Medis (PSC 119)', 'number': '119', 'dial': '119', 'available': '24 Jam / 7 Hari', 'category': 'Darurat', 'color': const Color(0xFFDC2626), 'bg': const Color(0xFFFEF2F2)},
+    {'name': 'Halo Kemenkes', 'number': '1500-567', 'dial': '1500567', 'available': 'Sen–Jum 07:00–23:00', 'category': 'Info Kesehatan', 'color': const Color(0xFF7C3AED), 'bg': const Color(0xFFF5F3FF)},
+    {'name': 'Yayasan Kanker Indonesia (Pusat)', 'number': '(021) 3152603', 'dial': '0213152603', 'available': 'Jam kantor', 'category': 'Onkologi', 'color': const Color(0xFFD97706), 'bg': const Color(0xFFFFFBEB)},
   ];
+
+  Future<void> _buka(Uri uri) async {
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Tidak bisa membuka ${uri.scheme == 'tel' ? 'aplikasi telepon' : 'peta'}.')),
+      );
+    }
+  }
+
+  void _telepon(String nomor) => _buka(Uri(scheme: 'tel', path: nomor));
+
+  /// Google Maps: cari dokter spesialis kulit di sekitar lokasi HP.
+  void _cariKlinik() => _buka(Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=dokter+spesialis+kulit+terdekat'));
 
   final List<String> selfCareTips = [
     'Hindari paparan sinar UV/matahari langsung pada area lesi yang mencurigakan',
@@ -144,7 +164,7 @@ class _EmergencyAssistanceScreenState extends State<EmergencyAssistanceScreen>
                   Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     child: GestureDetector(
-                      onTap: () {},
+                      onTap: () => _telepon('119'),
                       child: Container(
                         padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
@@ -195,7 +215,7 @@ class _EmergencyAssistanceScreenState extends State<EmergencyAssistanceScreen>
                   Container(
                     margin: const EdgeInsets.only(bottom: 16),
                     child: GestureDetector(
-                      onTap: () {},
+                      onTap: _cariKlinik,
                       child: Container(
                         padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
@@ -231,7 +251,7 @@ class _EmergencyAssistanceScreenState extends State<EmergencyAssistanceScreen>
                                   Text('Klinik Dermatologi', style: TextStyle(color: Colors.white70, fontSize: 11)),
                                   Text('Temukan Klinik Terdekat',
                                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
-                                  Text('Pencari klinik dermatologi terdekat',
+                                  Text('Dokter spesialis kulit terdekat (Google Maps)',
                                     style: TextStyle(color: Colors.white60, fontSize: 11.5)),
                                 ],
                               ),
@@ -272,7 +292,9 @@ class _EmergencyAssistanceScreenState extends State<EmergencyAssistanceScreen>
                           final h = e.value;
                           return Column(
                             children: [
-                              Padding(
+                              InkWell(
+                                onTap: () => _telepon(h['dial'] as String),
+                                child: Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                                 child: Row(
                                   children: [
@@ -296,14 +318,18 @@ class _EmergencyAssistanceScreenState extends State<EmergencyAssistanceScreen>
                                               Text(h['number'] as String,
                                                 style: TextStyle(color: h['color'] as Color, fontSize: 12.5, fontWeight: FontWeight.w700)),
                                               const SizedBox(width: 6),
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: h['bg'] as Color,
-                                                  borderRadius: BorderRadius.circular(100),
+                                              Flexible(
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: h['bg'] as Color,
+                                                    borderRadius: BorderRadius.circular(100),
+                                                  ),
+                                                  child: Text(h['category'] as String,
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: TextStyle(color: h['color'] as Color, fontSize: 9.5, fontWeight: FontWeight.w700)),
                                                 ),
-                                                child: Text(h['category'] as String,
-                                                  style: TextStyle(color: h['color'] as Color, fontSize: 9.5, fontWeight: FontWeight.w700)),
                                               ),
                                             ],
                                           ),
@@ -325,6 +351,7 @@ class _EmergencyAssistanceScreenState extends State<EmergencyAssistanceScreen>
                                       ],
                                     ),
                                   ],
+                                ),
                                 ),
                               ),
                               if (e.key < hotlines.length - 1)

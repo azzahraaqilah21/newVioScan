@@ -2,6 +2,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import '../providers/auth_provider.dart';
 import '../providers/screening_provider.dart';
 import '../providers/device_provider.dart';
@@ -340,6 +341,44 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     } finally {
       if (mounted) setState(() => _membuatLaporan = false);
     }
+  }
+
+  /// Foto lesi layar penuh; cubit untuk memperbesar, back/✕ untuk menutup.
+  void _lihatFotoPenuh(Uint8List foto) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog.fullscreen(
+        backgroundColor: Colors.black,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                maxScale: 6,
+                child: Center(child: Image.memory(foto, fit: BoxFit.contain)),
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(ctx).padding.top + 8,
+              right: 8,
+              child: IconButton(
+                onPressed: () => Navigator.pop(ctx),
+                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+              ),
+            ),
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 24,
+              child: Text(
+                'Cubit dengan dua jari untuk memperbesar',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Keluar dari layar hasil. Hasil yang sudah disimpan baru dibersihkan di
@@ -785,12 +824,36 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                             ),
                           ),
                           child: capturedImageBytes != null
-                              ? Stack(
+                              ? GestureDetector(
+                                  onTap: () => _lihatFotoPenuh(capturedImageBytes),
+                                  child: Stack(
                                   fit: StackFit.expand,
                                   children: [
                                     Image.memory(
                                       capturedImageBytes,
                                       fit: BoxFit.cover,
+                                    ),
+                                    Positioned(
+                                      bottom: 10,
+                                      right: 12,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.6),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.zoom_out_map_rounded, color: Colors.white, size: 12),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              'Ketuk untuk perbesar',
+                                              style: TextStyle(color: Colors.white, fontSize: 10.5),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                     Positioned(
                                       top: 10,
@@ -819,6 +882,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                       ),
                                     ),
                                   ],
+                                  ),
                                 )
                               : Stack(
                                   children: [

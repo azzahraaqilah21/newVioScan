@@ -233,11 +233,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                             ? 'Menghubungkan...'
                             : 'Disconnected';
 
+                    // Ditampilkan di atas "pil" putih agar jelas terbaca
+                    // di header teal.
                     final statusColor = isConnected
-                        ? const Color(0xFF77DAD7)
+                        ? const Color(0xFF047857)
                         : isConnecting
-                            ? const Color(0xFFFBBF24)
-                            : Colors.white54;
+                            ? const Color(0xFFB45309)
+                            : const Color(0xFFB91C1C);
 
                     final deviceName = connectedDevice?.name ?? 'BC-Care UV-Scan Pro';
 
@@ -278,8 +280,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                                   Text(
                                     'VioTech Device',
                                     style: TextStyle(
-                                      color: Colors.white.withOpacity(0.6),
-                                      fontSize: 11,
+                                      color: Colors.white.withOpacity(0.85),
+                                      fontSize: 11.5,
                                     ),
                                   ),
                                   Text(
@@ -294,14 +296,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                                 ],
                               ),
                             ),
-                            Row(
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(100),
+                              ),
+                              child: Row(
                               children: [
                                 if (isConnecting)
-                                  const SizedBox(
+                                  SizedBox(
                                     width: 8,
                                     height: 8,
                                     child: CircularProgressIndicator(
-                                      color: Color(0xFFFBBF24),
+                                      color: statusColor,
                                       strokeWidth: 1.5,
                                     ),
                                   )
@@ -328,11 +337,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                                   statusLabel,
                                   style: TextStyle(
                                     color: statusColor,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
                               ],
+                              ),
                             ),
                           ],
                         ),
