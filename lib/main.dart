@@ -34,6 +34,7 @@ const _authRequiredScreens = {
   'result',         // hasil skrining — wajib login
   'ai_detail',
   'history',
+  'history_detail', // hasil tersimpan dibuka dari Riwayat
   'profile',
   'about_bcc',
   'device',
@@ -162,6 +163,8 @@ class _AppNavigatorState extends State<AppNavigator> {
         return UVProcessingScreen(navigate: navigate);
       case 'result':
         return ScanResultScreen(navigate: navigate);
+      case 'history_detail':
+        return ScanResultScreen(navigate: navigate, fromHistory: true);
       case 'ai_detail':
         return AiAnalysisDetailScreen(navigate: navigate);
       case 'history':

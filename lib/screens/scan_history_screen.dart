@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -59,113 +58,6 @@ class _ScanHistoryScreenState extends ConsumerState<ScanHistoryScreen>
       c[s['risk'] as String] = (c[s['risk'] as String] ?? 0) + 1;
     }
     return c;
-  }
-
-  void _showDetail(ScreeningModel s, Map<String, dynamic> rc) {
-    final imageUrl = s.fluorescenceImageUrl ?? s.imageUrl;
-    final when =
-        '${_dateFmt.format(s.screeningDate)} · ${_timeFmt.format(s.screeningDate)} WIB';
-
-    Widget row(String label, String value) => Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 90,
-                child: Text(label,
-                    style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12.5)),
-              ),
-              Expanded(
-                child: Text(value,
-                    style: const TextStyle(
-                        color: Color(0xFF1F2937),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-        );
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) => SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(s.prediction,
-                  style: TextStyle(
-                      color: rc['text'] as Color,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text('${s.lesionLocation} · $when',
-                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
-              if (s.isSimulated) ...[
-                const SizedBox(height: 10),
-                const Text('HASIL SIMULASI — bukan diagnosis.',
-                    style: TextStyle(
-                        color: Color(0xFFB45309),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700)),
-              ],
-              if (s.rawImageBytes != null) ...[
-                // Foto tersimpan di dokumen Firestore (base64).
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.memory(
-                    s.rawImageBytes!,
-                    height: 200,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                  ),
-                ),
-              ] else if (imageUrl != null) ...[
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: CachedNetworkImage(
-                    imageUrl: imageUrl,
-                    height: 200,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorWidget: (_, __, ___) => const SizedBox(
-                      height: 60,
-                      child: Center(child: Text('Foto tidak dapat dimuat')),
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 14),
-              row('Risiko', rc['label'] as String),
-              row('Keyakinan', '${s.confidence.toStringAsFixed(1)}%'),
-              row('Mode', (s.mode ?? 'uv').toUpperCase()),
-              if (s.lesionNotes != null && s.lesionNotes!.isNotEmpty)
-                row('Catatan', s.lesionNotes!),
-              const SizedBox(height: 10),
-              const Text('Rekomendasi',
-                  style: TextStyle(
-                      color: Color(0xFF1F2937),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text(s.recommendation,
-                  style: const TextStyle(
-                      color: Color(0xFF4B5563), fontSize: 12.5, height: 1.5)),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   @override
@@ -339,8 +231,11 @@ class _ScanHistoryScreenState extends ConsumerState<ScanHistoryScreen>
                         key: ValueKey((scan['model'] as ScreeningModel).id),
                         scan: scan,
                         rc: rc,
-                        onTap: () =>
-                            _showDetail(scan['model'] as ScreeningModel, rc),
+                        onTap: () {
+                          ref.read(historyViewProvider.notifier).state =
+                              scan['model'] as ScreeningModel;
+                          widget.navigate('history_detail');
+                        },
                         index: i,
                       );
                     },

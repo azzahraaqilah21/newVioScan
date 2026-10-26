@@ -95,3 +95,6 @@ final activeScreeningProvider =
     StateNotifierProvider<ActiveScreeningNotifier, ScreeningModel?>((ref) {
   return ActiveScreeningNotifier();
 });
+
+/// Hasil dari Riwayat yang sedang dibuka di layar hasil (mode lihat saja).
+final historyViewProvider = StateProvider<ScreeningModel?>((ref) => null);

@@ -9,7 +9,16 @@ import '../models/screening_model.dart';
 
 class ScanResultScreen extends ConsumerStatefulWidget {
   final Function(String) navigate;
-  const ScanResultScreen({super.key, required this.navigate});
+
+  /// true = membuka hasil tersimpan dari Riwayat (historyViewProvider):
+  /// hanya dilihat — tanpa tombol Simpan & tanpa skenario demo.
+  final bool fromHistory;
+
+  const ScanResultScreen({
+    super.key,
+    required this.navigate,
+    this.fromHistory = false,
+  });
 
   @override
   ConsumerState<ScanResultScreen> createState() => _ScanResultScreenState();
@@ -219,7 +228,9 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     // Handle nilai awal hasil hardware setelah frame pertama (ref.read di sini
     // di initState adalah hal yang sah).
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final hwResult = ref.read(latestHardwareResultProvider);
+      final hwResult = widget.fromHistory
+          ? ref.read(historyViewProvider)
+          : ref.read(latestHardwareResultProvider);
       if (hwResult != null && mounted) {
         setState(() {
           riskLevel = hwResult.riskLevel;
@@ -246,6 +257,11 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
   /// sini (bukan saat Simpan) agar foto tetap terlihat, dan tidak tersimpan
   /// dua kali saat layar ini dibuka lagi.
   void _tinggalkanHasil() {
+    if (widget.fromHistory) {
+      ref.read(historyViewProvider.notifier).state = null;
+      widget.navigate('history');
+      return;
+    }
     if (_isSaved) {
       ref.read(latestHardwareResultProvider.notifier).clear();
       ref.read(capturedImageProvider.notifier).clear();
@@ -360,12 +376,17 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.of(context).padding.top;
-    final hwResult = ref.watch(latestHardwareResultProvider);
-    final capturedImageBytes = hwResult?.rawImageBytes ?? ref.watch(capturedImageProvider);
+    // Sumber data: hasil dari Riwayat (mode lihat) atau hasil alat terbaru.
+    final hwResult = widget.fromHistory
+        ? ref.watch(historyViewProvider)
+        : ref.watch(latestHardwareResultProvider);
+    final capturedImageBytes = hwResult?.rawImageBytes ??
+        (widget.fromHistory ? null : ref.watch(capturedImageProvider));
 
     // Listen for hardware result updates in real-time.
     // ref.listen HANYA sah di dalam build() dari ConsumerWidget/ConsumerState.
     ref.listen<ScreeningModel?>(latestHardwareResultProvider, (previous, next) {
+      if (widget.fromHistory) return; // mode Riwayat tidak ikut hasil alat baru
       if (next != null && mounted) {
         setState(() {
           riskLevel = next.riskLevel;
@@ -440,8 +461,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                         Flexible(
                           child: Builder(
                             builder: (_) {
-                              final hw = ref.watch(latestHardwareResultProvider);
-                              final date = hw?.screeningDate ?? DateTime.now();
+                              final date = hwResult?.screeningDate ?? DateTime.now();
                               final formatted = DateFormat(
                                 'd MMM yyyy · HH:mm',
                                 'id_ID',
@@ -515,7 +535,9 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                 child: Text(
                                   hwResult.isSimulated
                                       ? 'HASIL SIMULASI — model ML tidak aktif. BUKAN diagnosis. Jalankan export_to_tflite.py & deploy .tflite ke alat.'
-                                      : 'Hasil Real-time Raspberry Pi via Bluetooth (${hwResult.mode?.toUpperCase() ?? "UV"})',
+                                      : widget.fromHistory
+                                          ? 'Hasil tersimpan dari Riwayat (${hwResult.mode?.toUpperCase() ?? "UV"})'
+                                          : 'Hasil Real-time Raspberry Pi via Bluetooth (${hwResult.mode?.toUpperCase() ?? "UV"})',
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
@@ -530,14 +552,17 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                             ],
                           ),
                         ),
-                        GestureDetector(
-                          onTap: () {
-                            ref.read(latestHardwareResultProvider.notifier).clear();
-                            ref.read(capturedImageProvider.notifier).clear();
-                            setRisk('moderate');
-                          },
-                          child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF0A858C)),
-                        ),
+                        // Tombol buang hasil hanya untuk hasil alat yang baru,
+                        // bukan untuk hasil tersimpan yang dibuka dari Riwayat.
+                        if (!widget.fromHistory)
+                          GestureDetector(
+                            onTap: () {
+                              ref.read(latestHardwareResultProvider.notifier).clear();
+                              ref.read(capturedImageProvider.notifier).clear();
+                              setRisk('moderate');
+                            },
+                            child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF0A858C)),
+                          ),
                       ],
                     ),
                   )
@@ -1430,6 +1455,8 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                   // Action buttons
                   Row(
                     children: [
+                      // Hasil dari Riwayat sudah tersimpan — tanpa tombol Simpan.
+                      if (!widget.fromHistory) ...[
                       Expanded(
                         child: GestureDetector(
                           onTap: _isSaved ? null : _saveResult,
@@ -1459,6 +1486,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                         ),
                       ),
                       const SizedBox(width: 10),
+                      ],
                       Expanded(
                         flex: 2,
                         child: GestureDetector(
@@ -1480,17 +1508,26 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                 )
                               ],
                             ),
-                            child: const Row(
+                            child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Text('Kembali ke Beranda',
-                                  style: TextStyle(
+                                Text(
+                                  widget.fromHistory
+                                      ? 'Kembali ke Riwayat'
+                                      : 'Kembali ke Beranda',
+                                  style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w700,
                                     fontSize: 13,
                                   )),
-                                SizedBox(width: 5),
-                                Icon(Icons.home_rounded, color: Colors.white, size: 16),
+                                const SizedBox(width: 5),
+                                Icon(
+                                  widget.fromHistory
+                                      ? Icons.history_rounded
+                                      : Icons.home_rounded,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
                               ],
                             ),
                           ),
