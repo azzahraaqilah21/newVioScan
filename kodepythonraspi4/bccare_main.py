@@ -8,11 +8,10 @@ Fitur:
        - GPIO 22 (Hijau): NORMAL
        - GPIO 25 (Merah): BCC
   4. Sensor ultrasonik HC-SR04 untuk estimasi ketebalan/elevasi lesi
-  5. Bluetooth Classic RFCOMM/SPP offline →
-     streaming progress + hasil ke Android
+  5. Bluetooth SPP (RFCOMM) → streaming progress + hasil ke Android
   6. Push-button state machine (1-klik, 2-klik, tahan)
 
-Protokol (JSON + newline — transport Bluetooth Classic RFCOMM):
+Protokol Bluetooth (JSON + newline):
   Android → Raspi : {"command":"START_SCAN","mode":"uv"}\n
   Raspi → Android :
     {"type":"scan_started", ...}
@@ -37,14 +36,14 @@ from bccare_comm import BCCareComm
 # ================================================================
 # SINGLE-INSTANCE GUARD
 # Proses kedua tidak boleh jalan bersama proses pertama: mereka berebut
-# kamera (Device or resource busy) dan GPIO (channel already in use).
-# Deteksi via pidfile.
+# kamera (Device or resource busy), GPIO (channel already in use), dan
+# channel RFCOMM (Address already in use). Deteksi via pidfile.
 # ================================================================
 PIDFILE = "/tmp/bccare.pid"
 
 def _kill_stale_instance():
     """Jika ada proses bccare_main lama, hentikan (proses lama memegang
-    kamera/GPIO dan membuat instance baru gagal start)."""
+    kamera/GPIO/BT dan membuat instance baru gagal start)."""
     try:
         if os.path.exists(PIDFILE):
             old_pid = int(open(PIDFILE).read().strip())
@@ -57,7 +56,7 @@ def _kill_stale_instance():
                     pass
                 if "bccare_main" in cmdline:
                     print(f"[SISTEM] Proses lama ditemukan (PID {old_pid}) — "
-                          f"menghentikan agar kamera/GPIO terlepas...")
+                          f"menghentikan agar kamera/GPIO/BT terlepas...")
                     subprocess.run(["kill", str(old_pid)], timeout=5)
                     # Tunggu sampai benar-benar mati (max 5 detik)
                     for _ in range(25):
@@ -107,10 +106,7 @@ AMBANG_AMAN_MM    = ERROR_SENSOR_MM * 1.41
 # ================================================================
 # INISIALISASI
 # ================================================================
-# Direktori hasil scan & DB disimpan di direktori home user yang aktif
-# (mis. /home/pi atau /home/padilkyun) — bukan path hardcoded yang bisa
-# beda username / belum ada.
-SAVE_DIR = os.path.join(os.path.expanduser("~"), "bccare_captures")
+SAVE_DIR = "/home/bccare/bccare_captures"
 os.makedirs(SAVE_DIR, exist_ok=True)
 init_db()
 
@@ -134,18 +130,45 @@ except Exception as gpio_err:
 # ================================================================
 # DETEKSI KAMERA
 # ================================================================
-try:
-    from picamera2 import Picamera2
-    picam2 = Picamera2()
-    picam2.configure(picam2.create_still_configuration())
-    picam2.start()
-    time.sleep(1)
-    kamera_tersedia = True
-    print("[KAMERA] Arducam/PiCamera2 siap.")
-except Exception as cam_err:
-    picam2 = None
-    kamera_tersedia = False
-    print(f"[KAMERA] Tidak terdeteksi ({cam_err}). Mode simulasi gambar aktif.")
+# Capture memakai `rpicam-still` (subprocess) — lihat apply_cam_patch_v2.py.
+# picam2 dibiarkan None agar release_camera() & kode lain tetap aman.
+import shutil as _shutil
+import subprocess as _subprocess
+
+picam2 = None
+RPICAM_BIN = _shutil.which("rpicam-still")
+kamera_tersedia = RPICAM_BIN is not None
+CAM_TIMEOUT_S = 25   # batas satu panggilan rpicam-still (detik)
+if kamera_tersedia:
+    print(f"[KAMERA] Capture via {RPICAM_BIN} (subprocess, timeout {CAM_TIMEOUT_S}s).")
+else:
+    print("[KAMERA] rpicam-still tidak ditemukan. Mode simulasi gambar aktif.")
+
+
+def _capture_dengan_timeout(filename):
+    """Ambil foto lewat rpicam-still. Return (ok, pesan_error).
+    Maks 2 percobaan; proses yang macet dibunuh setelah CAM_TIMEOUT_S."""
+    last_err = "tidak diketahui"
+    cmd = [RPICAM_BIN, "-n", "-t", "1000", "-o", filename]
+    for percobaan in (1, 2):
+        try:
+            if os.path.exists(filename):
+                os.remove(filename)
+            r = _subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=CAM_TIMEOUT_S)
+            if (r.returncode == 0 and os.path.exists(filename)
+                    and os.path.getsize(filename) > 0):
+                return True, None
+            tail = (r.stderr or "").strip().splitlines()[-1:] or ["(tanpa pesan)"]
+            last_err = f"kode {r.returncode}: {tail[0][:120]}"
+        except _subprocess.TimeoutExpired:
+            last_err = f"timeout {CAM_TIMEOUT_S} detik"
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+        print(f"[KAMERA] Capture percobaan {percobaan}/2 gagal: {last_err}")
+        time.sleep(1)
+    return False, (f"kamera tidak mengirim gambar ({last_err}). "
+                   f"Periksa kabel CSI/konektor.")
 
 
 def release_camera():
@@ -180,14 +203,32 @@ terakhir_ultrasonik = {
 }
 
 # ================================================================
-# ML CLASSIFIER & HANDLER PERINTAH
+# ML CLASSIFIER & BLUETOOTH
 # ================================================================
 classifier = get_classifier()
 
 
-def on_command(command, params):
+def on_bluetooth_command(command, params):
     """Callback dari BCCareComm saat Android mengirim perintah."""
     global current_mode
+    if command == "SHUTDOWN":
+        # Permintaan dari aplikasi = setara tahan tombol fisik 8 detik.
+        if scan_lock.locked():
+            comm.send_error("Scan sedang berjalan. Tunggu selesai sebelum mematikan alat.")
+            return
+        if not _izin_shutdown_ada():
+            comm.send_error("Izin shutdown belum dipasang di Raspberry Pi "
+                            "(/etc/sudoers.d/bccare). Alat tidak dimatikan.")
+            return
+        print("[BT-CMD] SHUTDOWN diterima dari aplikasi.")
+        comm.send_json({
+            "type": "shutting_down",
+            "message": "Alat sedang dimatikan. Tunggu ±20 detik sebelum mencabut daya.",
+        })
+        time.sleep(1)  # beri waktu pesan terkirim sebelum Bluetooth ditutup
+        matikan_alat_dengan_aman()
+        return
+
     if command in ("START_SCAN", "PREPARE_SCAN"):
         req_mode = params.get("mode", "uv")
         if req_mode in ("uv", "white") and req_mode != current_mode:
@@ -210,18 +251,18 @@ def on_command(command, params):
                 "mode": current_mode,
                 "message": "Alat siap. Tekan tombol fisik pada probe untuk memulai.",
             })
-            print(f"[NET-CMD] PREPARE_SCAN diterima → siap (mode: {current_mode})")
+            print(f"[BT-CMD] PREPARE_SCAN diterima → siap (mode: {current_mode})")
             return
 
-        print(f"[NET-CMD] START_SCAN diterima (mode: {current_mode})")
+        print(f"[BT-CMD] START_SCAN diterima (mode: {current_mode})")
         ambil_gambar_dengan_error_handling()
 
 
 def ambil_gambar_dengan_error_handling():
     """
-    Wrapper ambil_gambar dengan try/except. Exception di thread scan (dari
-    perintah Android atau tombol fisik) tidak boleh mati diam-diam — Android
-    harus menerima event 'error' agar UI tidak menggantung selamanya.
+    Wrapper ambil_gambar dengan try/except. Exception di thread scan (Bluetooth
+    atau tombol fisik) tidak boleh mati diam-diam — Android harus menerima
+    event 'error' agar UI tidak menggantung selamanya.
     """
     try:
         ambil_gambar()
@@ -230,8 +271,9 @@ def ambil_gambar_dengan_error_handling():
         comm.send_error(f"Scan gagal: {e}")
 
 
-# Channel RFCOMM 1 adalah kanal SPP yang dipakai client Flutter.
-comm = BCCareComm(port=1, on_command_callback=on_command)
+# port=1 dipilih agar cocok dengan fallback channel 1 dari flutter_bluetooth_serial
+# (di Android, jika SDP lookup channel gagal, plugin default ke channel 1).
+comm = BCCareComm(port=1, on_command_callback=on_bluetooth_command)
 
 # ================================================================
 # KONTROL LED
@@ -362,15 +404,15 @@ def ambil_gambar():
 
         # Step 2: Ambil foto
         comm.send_scan_progress(2, SCAN_TOTAL, SCAN_STEPS[1])
-        if kamera_tersedia and picam2:
-            try:
-                picam2.capture_file(filename)
+        if kamera_tersedia:
+            ok_cap, err_cap = _capture_dengan_timeout(filename)
+            if ok_cap:
                 print(f"[KAMERA] Foto tersimpan: {filename}")
-            except Exception as e:
+            else:
                 # Jangan diam-diam ganti dengan gambar mock — alat medis harus
                 # jujur: kamera gagal berarti scan tidak valid.
-                print(f"[KAMERA] Gagal capture: {e}")
-                comm.send_error(f"Kamera gagal mengambil foto: {e}")
+                print(f"[KAMERA] Gagal capture: {err_cap}")
+                comm.send_error(f"Kamera gagal mengambil foto: {err_cap}")
                 return None
         else:
             # Tanpa kamera fisik (testbed/dev), pakai gambar tiruan TAPI beri
@@ -552,6 +594,17 @@ def ukur_lesi():
 # SHUTDOWN
 # ================================================================
 
+def _izin_shutdown_ada():
+    """True jika user boleh 'sudo shutdown' tanpa password (aturan
+    /etc/sudoers.d/bccare). Tanpa izin ini program berhenti tapi Pi tetap menyala."""
+    try:
+        r = subprocess.run(["sudo", "-n", "-l", "/usr/sbin/shutdown"],
+                           capture_output=True, timeout=5)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def matikan_alat_dengan_aman():
     print("[SHUTDOWN] Mematikan alat...")
     reset_disease_leds()
@@ -624,9 +677,9 @@ if __name__ == "__main__":
         print(f"  LED Putih  : GPIO {PIN_LED_WHITE}")
         print("=" * 60)
 
-        # Server Bluetooth harus start sebelum button_loop agar
-        # HP Android bisa konek & kirim START_SCAN kapan saja.
-        print("[BT] Memulai server Bluetooth Classic SPP...")
+        # Bluetooth harus start sebelum button_loop agar
+        # Android bisa konek & kirim START_SCAN kapan saja
+        print("[BT] Memulai Bluetooth RFCOMM server...")
         comm.start_bluetooth_server()
 
         print("[SISTEM] Siap. Tekan tombol fisik atau kirim START_SCAN dari Android.")

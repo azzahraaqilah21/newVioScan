@@ -1,7 +1,6 @@
 """
-BCcare - Modul komunikasi Bluetooth Classic RFCOMM/SPP
+BCcare - Modul Komunikasi Bluetooth SPP (Serial Port Profile / RFCOMM)
 Mengirimkan data klasifikasi ML, pembacaan ultrasonik, dan foto secara offline ke Android.
-Protokol: JSON + newline.
 
 Protokol:
   Android → Raspi  : JSON + newline  e.g. {"command":"START_SCAN","mode":"uv"}\n
@@ -10,14 +9,13 @@ Protokol:
 Event types yang dikirim ke Android:
   pong                 : respons PING, konfirmasi perangkat siap
   scan_started         : scan mulai diproses
-  scan_ready           : alat siap (PREPARE_SCAN, menunggu tombol fisik)
   scan_progress        : update tahap pemrosesan (step 1-4)
   classification_result: hasil final beserta gambar base64 dan data ultrasonik
   all_results          : ringkasan semua riwayat scan (tanpa gambar)
   error                : pesan error
 
 Catatan implementasi:
-  - send_json() memakai sendall() (bukan send()) — wajib, karena payload
+  - send_json() memakai socket.sendall() (bukan send()) — wajib, karena payload
     classification_result berisi base64 gambar (puluhan KB hingga ratusan KB)
     dan socket.send() bisa short-write sehingga JSON terpotong & gagal di-parse
     di sisi Android.
@@ -28,6 +26,7 @@ import json
 import threading
 import time
 import os
+import socket
 import base64
 from io import BytesIO
 from PIL import Image
@@ -39,20 +38,14 @@ except ImportError:
 
 
 class BCCareComm:
-    RFCOMM_CHANNEL = 1
-    SPP_UUID = "00001101-0000-1000-8000-00805F9B34FB"
-
-    def __init__(self, host="", port=RFCOMM_CHANNEL, on_command_callback=None):
+    def __init__(self, port=1, on_command_callback=None):
         """
-        Server Bluetooth Classic SPP untuk koneksi Android.
-
+        Inisialisasi server Bluetooth RFCOMM.
         Args:
-            host: interface untuk bind server ("" = semua interface)
-            port: RFCOMM channel (default 1)
+            port: Port RFCOMM (default 1)
             on_command_callback: Callback saat ada perintah dari Android
                                  signature: func(command: str, params: dict)
         """
-        self.host = host
         self.port = port
         self.on_command_callback = on_command_callback
         self.server_sock = None
@@ -60,51 +53,188 @@ class BCCareComm:
         self.client_address = None
         self.running = False
         self.lock = threading.Lock()   # serialisasi send_json dari multi-thread
+        self.use_native_socket = False
+        self.profile_server = None     # SPPProfileServer (BlueZ D-Bus)
 
     # ================================================================
     # SERVER LIFECYCLE
     # ================================================================
 
+    def _run_cmd(self, cmd, timeout=8):
+        """Jalankan command sistem, return (returncode, output gabungan)."""
+        import subprocess
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
+        except FileNotFoundError:
+            return -1, f"{cmd[0]}: tidak ditemukan"
+        except subprocess.TimeoutExpired:
+            return -2, f"{cmd[0]}: timeout"
+        except Exception as e:
+            return -3, str(e)
+
+    def _ensure_adapter_ready(self):
+        """
+        Pastikan adapter Bluetooth UP, discoverable & pairable SEBELUM bind.
+
+        Gejala yang dihindari: PyBluez 'no advertisable device' = hci0 DOWN /
+        belum powered → record SPP TIDAK terdaftar ke SDP → Android gagal
+        resolve channel RFCOMM → koneksi selalu gagal walau server jalan.
+        Return True jika adapter siap.
+        """
+        self._run_cmd(["rfkill", "unblock", "bluetooth"])
+
+        rc, out = self._run_cmd(["bluetoothctl", "show"])
+        if rc != 0 or not out:
+            print(f"[BT] Adapter tidak terdeteksi ({out}).")
+            print("[BT] Cek hardware/driver: 'systemctl status hciuart' ; "
+                  "'dmesg | grep -i -E bluetooth|uart' ; 'ls /sys/class/bluetooth'")
+            return False
+
+        if "Powered: yes" not in out:
+            self._run_cmd(["bluetoothctl", "power", "on"])
+            if "Powered: yes" not in self._run_cmd(["bluetoothctl", "show"])[1]:
+                self._run_cmd(["sudo", "-n", "bluetoothctl", "power", "on"])
+
+        self._run_cmd(["bluetoothctl", "discoverable", "on"])
+        self._run_cmd(["bluetoothctl", "pairable", "on"])
+        # Discoverable default hilang setelah 3 menit (timeout 180) — saat user
+        # scan dari HP belakangan, device sudah tidak terlihat lagi. 0 = permanen.
+        self._run_cmd(["bluetoothctl", "discoverable-timeout", "0"])
+        # Nama yang tampil saat discovery dari HP (abaikan jika command tak ada)
+        self._run_cmd(["bluetoothctl", "set-alias", "BC-Care"])
+        self._run_cmd(["bluetoothctl", "system-alias", "BC-Care"])
+
+        # Re-read SETELAH semua command (status sebelumnya bisa stale) +
+        # fallback sudo untuk discoverable/pairable yang butuh privilege.
+        rc, out = self._run_cmd(["bluetoothctl", "show"])
+        if "Discoverable: yes" not in out:
+            self._run_cmd(["sudo", "-n", "bluetoothctl", "discoverable", "on"])
+            rc, out = self._run_cmd(["bluetoothctl", "show"])
+        if "Pairable: yes" not in out:
+            self._run_cmd(["sudo", "-n", "bluetoothctl", "pairable", "on"])
+            rc, out = self._run_cmd(["bluetoothctl", "show"])
+
+        addr = "?"
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("Controller"):
+                addr = line.split()[1] if len(line.split()) > 1 else addr
+        powered = "Powered: yes" in out
+        disc = "Discoverable: yes" in out
+        pairable = "Pairable: yes" in out
+        print(f"[BT] Adapter {addr} — powered={powered} discoverable={disc} pairable={pairable}")
+
+        if not powered:
+            print("[BT] [FIX] Adapter masih OFF. Jalankan manual lalu ulangi script:")
+            print("       sudo bluetoothctl power on ; sudo rfkill unblock bluetooth")
+            return False
+        return True
+
     def start_bluetooth_server(self):
-        """Dengar koneksi Bluetooth Classic RFCOMM dengan profil SPP."""
+        """Memulai server RFCOMM. Fallback: PyBluez → native AF_BLUETOOTH."""
         if self.running:
             return True
         self.running = True
+
+        self._ensure_adapter_ready()
+
+        # --- Prioritas 0: BlueZ D-Bus Profile (tanpa PyBluez / --compat) ---
+        try:
+            try:
+                from bccare_bt_profile import SPPProfileServer
+            except ImportError:
+                from .bccare_bt_profile import SPPProfileServer
+            self.profile_server = SPPProfileServer(
+                on_connection=self._on_profile_connection,
+                name="BCcare", channel=self.port,
+            )
+            self.profile_server.start()
+            print("[BT] Menunggu koneksi dari Android (via BlueZ profile)...")
+            return True
+        except Exception as e_dbus:
+            self.profile_server = None
+            print(f"[BT] Jalur D-Bus gagal ({e_dbus}), mencoba PyBluez/native...")
+
+        # --- Prioritas 1: PyBluez ---
         try:
             import bluetooth
             self.server_sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-            self.server_sock.bind(("", self.port))
-            self.server_sock.listen(5)
+            # SO_REUSEADDR: tanpa ini, restart cepat menghasilkan
+            # "Channel 1 sibuk" karena socket lama masih berlabuh di kernel.
+            self.server_sock.setsockopt(
+                socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Bind channel yang DIMINTA dulu (default 1 — cocok dengan fallback
+            # channel 1 dari flutter_bluetooth_serial jika SDP lookup gagal di
+            # Android). Hanya jika channel sibuk → jatuh ke PORT_ANY.
+            try:
+                self.server_sock.bind(("", self.port))
+            except OSError:
+                print(f"[BT] Channel {self.port} sibuk — pakai PORT_ANY...")
+                self.server_sock.bind(("", bluetooth.PORT_ANY))
+            self.server_sock.listen(1)
+            actual_port = self.server_sock.getsockname()[1]
+            uuid = "00001101-0000-1000-8000-00805F9B34FB"
             try:
                 bluetooth.advertise_service(
-                    self.server_sock,
-                    "BC-Care",
-                    service_id=self.SPP_UUID,
-                    service_classes=[self.SPP_UUID, bluetooth.SERIAL_PORT_CLASS],
+                    self.server_sock, "BCcare",
+                    service_id=uuid,
+                    service_classes=[uuid, bluetooth.SERIAL_PORT_CLASS],
                     profiles=[bluetooth.SERIAL_PORT_PROFILE],
                 )
-                print("[BT] Layanan SPP BC-Care diiklankan melalui SDP.")
-            except Exception as e:
-                print(f"[BT] Gagal advertise layanan SDP: {e}. "
-                      "Android mungkin tidak dapat menemukan RFCOMM service.")
-            print(f"[BT] Server RFCOMM menunggu koneksi pada channel {self.port}.")
+                print(f"[BT] Layanan SPP 'BCcare' diiklankan pada RFCOMM channel {actual_port}")
+            except Exception as ad_err:
+                print(f"[BT] Warning advertise: {ad_err} (tetap melanjutkan)")
+            print(f"[BT] Server PyBluez siap pada channel {actual_port}")
             threading.Thread(target=self._accept_loop, daemon=True).start()
             return True
         except Exception as e:
-            print(f"[BT] Gagal memulai server Bluetooth RFCOMM: {e}")
-            self.running = False
-            return False
+            print(f"[BT] PyBluez tidak tersedia ({e}), mencoba native AF_BLUETOOTH...")
+
+        # --- Prioritas 2: native Linux AF_BLUETOOTH ---
+        # (socket diimport di level module — TIDAK di sini. Import lokal di
+        #  fungsi ini membuat Python menganggap 'socket' variabel lokal seluruh
+        #  fungsi → UnboundLocalError pada SO_REUSEADDR di atas.)
+        try:
+            if hasattr(socket, "AF_BLUETOOTH") and hasattr(socket, "BTPROTO_RFCOMM"):
+                self.server_sock = socket.socket(
+                    socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM
+                )
+                self.server_sock.bind((socket.BDADDR_ANY, self.port))
+                self.server_sock.listen(1)
+                self.use_native_socket = True
+                print(f"[BT] Server native AF_BLUETOOTH berjalan pada channel {self.port}")
+                threading.Thread(target=self._accept_loop, daemon=True).start()
+                return True
+            else:
+                print("[BT] Kernel tidak mendukung AF_BLUETOOTH.")
+        except Exception as e_nat:
+            print(f"[BT] Gagal memulai server native bluetooth: {e_nat}")
+
+        print("[BT] Mode virtual (simulasi) — tidak ada koneksi fisik.")
+        return False
+
+    def _on_profile_connection(self, sock, device_path):
+        """Dipanggil BlueZ saat Android terhubung (socket RFCOMM sudah jadi)."""
+        self._cleanup_client()          # satu klien aktif dalam satu waktu
+        with self.lock:
+            self.client_sock = sock
+            self.client_address = device_path
+        print(f"[BT] Android terhubung: {device_path}")
+        threading.Thread(
+            target=self._handle_client_stream, args=(sock,), daemon=True
+        ).start()
 
     def _accept_loop(self):
         """Loop terima koneksi masuk; satu klien aktif dalam satu waktu."""
         while self.running:
             try:
-                print("[BT] Menunggu koneksi Bluetooth dari HP...")
+                print("[BT] Menunggu koneksi dari Android...")
                 client, client_info = self.server_sock.accept()
                 with self.lock:
                     self.client_sock = client
                     self.client_address = client_info
-                print(f"[BT] HP terhubung: {client_info}")
+                print(f"[BT] Android terhubung: {client_info}")
                 self._handle_client_stream(client)
             except Exception as e:
                 if self.running:
@@ -139,7 +269,7 @@ class BCCareComm:
                     pass
                 self.client_sock = None
                 self.client_address = None
-                print("[BT] Koneksi klien ditutup.")
+                print("[BT] Koneksi klien Android ditutup.")
 
     # ================================================================
     # COMMAND HANDLING
@@ -148,6 +278,7 @@ class BCCareComm:
     def _process_incoming_command(self, raw_cmd):
         """Proses perintah JSON dari Android."""
         print(f"[BT] Perintah masuk: {raw_cmd}")
+
         cmd_name = raw_cmd
         params = {}
 
@@ -156,8 +287,10 @@ class BCCareComm:
                 parsed = json.loads(raw_cmd)
                 cmd_name = parsed.get("command", "")
                 params = parsed
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[BT] JSON tidak valid: {e}")
+                self.send_error("Format perintah JSON tidak valid.")
+                return
 
         try:
             if cmd_name == "PING":
@@ -168,22 +301,15 @@ class BCCareComm:
                     "time": time.time(),
                 })
 
-            elif cmd_name == "START_SCAN":
-                mode = params.get("mode", "uv")
-                self.send_json({
-                    "type": "scan_started",
-                    "mode": mode,
-                    "message": "Memulai pemindaian...",
-                })
-                if self.on_command_callback:
-                    threading.Thread(
-                        target=self.on_command_callback,
-                        args=("START_SCAN", params),
-                        daemon=True,
-                    ).start()
-
             elif cmd_name == "PREPARE_SCAN":
-                # Callback (bccare_main.on_command) yang mengirim 'scan_ready'.
+                mode = params.get("mode", "uv")
+
+                if mode not in ("uv", "white"):
+                    self.send_error(
+                        "Mode tidak valid. Gunakan uv atau white."
+                    )
+                    return
+
                 if self.on_command_callback:
                     threading.Thread(
                         target=self.on_command_callback,
@@ -191,7 +317,25 @@ class BCCareComm:
                         daemon=True,
                     ).start()
                 else:
-                    self.send_error("Handler PREPARE_SCAN belum terpasang.")
+                    self.send_error("Handler perintah belum tersedia.")
+
+            elif cmd_name == "START_SCAN":
+                mode = params.get("mode", "uv")
+
+                self.send_json({
+                    "type": "scan_started",
+                    "mode": mode,
+                    "message": "Memulai pemindaian...",
+                })
+
+                if self.on_command_callback:
+                    threading.Thread(
+                        target=self.on_command_callback,
+                        args=("START_SCAN", params),
+                        daemon=True,
+                    ).start()
+                else:
+                    self.send_error("Handler perintah belum tersedia.")
 
             elif cmd_name == "GET_LATEST":
                 self.send_latest_saved_result()
@@ -200,10 +344,11 @@ class BCCareComm:
                 self.send_all_saved_results()
 
             elif cmd_name.startswith("GET_IMAGE:"):
-                # Format: GET_IMAGE:/home/<user>/bccare_captures/UV_xxx.jpg
                 requested = cmd_name.split(":", 1)[1].strip()
+
                 if os.path.exists(requested):
                     img_b64 = self._encode_image_to_base64(requested)
+
                     if img_b64:
                         self.send_json({
                             "type": "classification_result",
@@ -214,15 +359,34 @@ class BCCareComm:
                     else:
                         self.send_error("Gagal encode gambar.")
                 else:
-                    self.send_error(f"Gambar tidak ditemukan: {requested}")
+                    self.send_error(
+                        f"Gambar tidak ditemukan: {requested}"
+                    )
+
+            elif cmd_name == "SHUTDOWN":
+                # Matikan Raspberry Pi atas permintaan aplikasi (setara tahan
+                # tombol fisik 8 detik). bccare_main yang mengirim
+                # 'shutting_down' lalu menjalankan shutdown.
+                if self.on_command_callback:
+                    threading.Thread(
+                        target=self.on_command_callback,
+                        args=("SHUTDOWN", params),
+                        daemon=True,
+                    ).start()
+                else:
+                    self.send_error("Handler perintah belum tersedia.")
 
             elif cmd_name == "DISCONNECT":
                 self._cleanup_client()
 
             else:
-                self.send_error(f"Perintah tidak dikenal: {cmd_name}")
+                self.send_error(
+                    f"Perintah tidak dikenal: {cmd_name}"
+                )
+
         except Exception as e:
-            self.send_error(f"Handler error: {e}")
+            print(f"[BT] Gagal memproses perintah {cmd_name}: {e}")
+            self.send_error(f"Gagal memproses perintah: {e}")
 
     # ================================================================
     # PROGRESS STREAMING  (dipanggil dari bccare_main.py)
@@ -369,7 +533,7 @@ class BCCareComm:
     def send_json(self, obj):
         """
         Kirim satu JSON object diakhiri newline ke klien Android yang terhubung.
-        WAJIB sendall(): payload bisa ratusan KB (base64 gambar) dan send()
+        WAJIB sendall(): payload bisa ratusan KB (base64 gambar) dan socket.send()
         bisa short-write → JSON terpotong di sisi Android.
         """
         if not self.client_sock:
@@ -391,13 +555,19 @@ class BCCareComm:
     # ================================================================
 
     def stop(self):
-        """Hentikan server RFCOMM dan bersihkan semua resource."""
+        """Hentikan server Bluetooth dan bersihkan semua resource."""
         self.running = False
         self._cleanup_client()
+        if self.profile_server:
+            try:
+                self.profile_server.stop()
+            except Exception:
+                pass
+            self.profile_server = None
         if self.server_sock:
             try:
                 self.server_sock.close()
             except Exception:
                 pass
             self.server_sock = None
-        print("[BT] Server RFCOMM dihentikan.")
+        print("[BT] Bluetooth server dihentikan.")

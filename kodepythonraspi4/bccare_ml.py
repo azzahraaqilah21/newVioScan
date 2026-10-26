@@ -124,13 +124,23 @@ class BCCareClassifier:
 
     def _init_tflite_interpreter(self, path):
         try:
-            # Coba tflite_runtime dulu (ringan untuk Raspberry Pi)
-            try:
-                from tflite_runtime.interpreter import Interpreter
-                interp = Interpreter(model_path=path, num_threads=4)
-            except ImportError:
+            # Urutan: tflite_runtime -> ai_edge_litert (LiteRT) -> tensorflow penuh.
+            # Backend ringan yang gagal (import / buat interpreter) -> coba berikutnya.
+            import importlib
+            interp = None
+            for modname in ("tflite_runtime.interpreter",
+                            "ai_edge_litert.interpreter"):
+                try:
+                    mod = importlib.import_module(modname)
+                    interp = mod.Interpreter(model_path=path, num_threads=4)
+                    print(f"[ML] Backend TFLite: {modname}")
+                    break
+                except Exception:
+                    interp = None
+            if interp is None:
                 import tensorflow as tf
                 interp = tf.lite.Interpreter(model_path=path, num_threads=4)
+                print("[ML] Backend TFLite: tensorflow (fallback)")
 
             interp.allocate_tensors()
             return interp

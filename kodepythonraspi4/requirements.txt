@@ -16,30 +16,36 @@
 #       python3-venv python3-dev \
 #       python3-numpy python3-pil \
 #       python3-rpi.gpio \
-#       python3-picamera2 python3-libcamera
+#       python3-picamera2 python3-libcamera \
+#       libbluetooth-dev bluez pi-bluetooth
 #
 #     • python3-picamera2 : driver kamera. WAJIB via apt — versi pip butuh
 #       binding libcamera yang tidak ada di PyPI.
 #     • python3-rpi.gpio  : GPIO (LED iluminasi/indikator, HC-SR04, tombol).
+#     • libbluetooth-dev  : header C agar PyBluez bisa di-compile.
+#     • pi-bluetooth+bluez: stack Bluetooth Classic (SPP/RFCOMM).
 #
 # ── 2. Virtual environment yang tetap melihat paket apt ─────────────────────
 #   python3 -m venv --system-site-packages ~/bccare_venv
 #   source ~/bccare_venv/bin/activate
 #   pip install -r requirements.txt
 #
-# ── 3. Kamera ───────────────────────────────────────────────────────────────
+# ── 3. Kamera & layanan Bluetooth ───────────────────────────────────────────
 #   sudo raspi-config nonint do_camera 0
+#   sudo systemctl enable --now bluetooth
 #
 # ── 4. Paket perangkat keras (best-effort — jalankan terpisah agar kegagalannya
 #       tidak menggagalkan instalasi utama di atas) ──────────────────────────
+#   pip install PyBluez                  # SPP + registrasi SDP (disarankan)
 #   python3 -c "import RPi.GPIO" 2>/dev/null || pip install RPi.GPIO
 #                                        # fallback apt sudah via --system-site-packages
 #   # Jika RPi.GPIO gagal build di Python 3.13:
 #   #   pip install rpi-lgpio            # shim API-compatible
 #
 # CATATAN PENTING
-#   • Transport ke Android = Bluetooth Classic SPP (RFCOMM).
-#     Pasang binding sistem pada Raspberry Pi: sudo apt install python3-bluez
+#   • PyBluez mendaftarkan service SPP ke SDP agar flutter_bluetooth_serial di
+#     Android bisa menemukan & konek. Fallback native AF_BLUETOOTH (tanpa
+#     PyBluez) TIDAK mendaftar SDP → pairing manual lalu konek by-address.
 #   • Python 3.13 (Trixie): tidak ada wheel tflite-runtime → jalur TF penuh
 #     dipilih otomatis (marker di bawah). Unduhan besar (~200 MB+) tapi
 #     sekalian membuka fallback pemuatan model .keras (Keras 3) bila .tflite
@@ -65,10 +71,11 @@ tflite-runtime>=2.10 ; python_version < "3.11"
 # TF >= 2.16 menerbitkan wheel linux_aarch64 resmi di PyPI.
 tensorflow>=2.16 ; python_version >= "3.11"
 
-# ── GPIO TIDAK di sini ───────────────────────────────────────────────────────
+# ── GPIO & PyBluez TIDAK di sini ─────────────────────────────────────────────
 # Sengaja tidak masuk requirements: jika build-nya gagal (mis. RPi.GPIO di
 # Python 3.13), `pip install -r` akan berhenti sebelum selesai. install.sh
 # memasangnya secara best-effort sebagai langkah terpisah. Contoh manual:
+#   pip install PyBluez
 #   pip install RPi.GPIO ; platform_machine == "aarch64"
 
 # picamera2 TIDAK dipasang via pip — gunakan apt python3-picamera2 (lihat atas).
@@ -76,5 +83,5 @@ tensorflow>=2.16 ; python_version >= "3.11"
 # Catatan Pi 5 (bukan target saat ini): RPi.GPIO tidak bekerja di Pi 5.
 #   pip install rpi-lgpio     # shim API-compatible pengganti RPi.GPIO
 
-# Tidak perlu di-install (stdlib): sqlite3, json, base64, threading,
+# Tidak perlu di-install (stdlib): sqlite3, json, base64, threading, socket,
 # tempfile, zipfile, subprocess, time, os, sys

@@ -25,14 +25,12 @@ PY=python3
 PYVER=$($PY -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 ok "Python $PYVER"
 
-# Direktori hasil scan & DB — konsisten dengan bccare_main.py/bccare_db.py.
-CAP_DIR="$HOME/bccare_captures"
-
 # ── 1. Paket APT ────────────────────────────────────────────────────────────
 APT_PKGS=(
     python3-venv python3-dev python3-numpy python3-pil
-    python3-rpi.gpio python3-bluez
+    python3-rpi.gpio
     python3-picamera2 python3-libcamera
+    libbluetooth-dev bluez pi-bluetooth
 )
 
 if [[ $CHECK_ONLY -eq 0 ]]; then
@@ -62,6 +60,8 @@ if [[ $CHECK_ONLY -eq 0 ]]; then
 
     # ── 4. Paket hardware — BEST-EFFORT (kegagalan tidak menggagalkan utama) ──
     bold "[4/5] Paket hardware (best-effort)..."
+    # PyBluez: registrasi SDP agar Android bisa discover alat.
+    pip install PyBluez && ok "PyBluez" || warn "PyBluez gagal — server jalan via fallback native; Android harus konek by-address setelah pairing manual."
     # GPIO: RPi.GPIO bisa gagal build di Python 3.13 → fallback ke rpi-lgpio.
     if $PY -c "import RPi.GPIO" 2>/dev/null; then
         ok "RPi.GPIO (sudah ada / dari apt)"
@@ -77,39 +77,10 @@ else
     bold "[4/5] (check) Lewati paket hardware."
 fi
 
-# ── 5. Kamera + direktori hasil + service systemd ───────────────────────────
-bold "[5/5] Konfigurasi kamera, direktori hasil, & service"
+# ── 5. Kamera + Bluetooth service ───────────────────────────────────────────
+bold "[5/5] Konfigurasi kamera & Bluetooth"
 sudo raspi-config nonint do_camera 0
-mkdir -p "$CAP_DIR"
-ok "Direktori hasil: $CAP_DIR"
-
-if [[ $CHECK_ONLY -eq 0 ]]; then
-    # Install unit service agar server otomatis mulai saat boot.
-    SVC_SRC="$(pwd)/bccare_main.service"
-    if [[ -f "$SVC_SRC" ]]; then
-        sudo cp "$SVC_SRC" /etc/systemd/system/bccare_main.service
-        # WORKING_DIRECTORY & ExecStart di unit disalin dari file ini — pastikan
-        # mengarah ke direktori deploy sebenarnya.
-        sudo sed -i \
-            -e "s|^WorkingDirectory=.*|WorkingDirectory=$(pwd)|" \
-            -e "s|^ExecStart=.*|ExecStart=/usr/bin/python3 $(pwd)/bccare_main.py|" \
-            -e "s|^User=.*|User=$(whoami)|" \
-            -e "s|^Group=.*|Group=$(id -gn)|" \
-            /etc/systemd/system/bccare_main.service
-        sudo systemctl daemon-reload
-        # Pemakaian normal: servis dimulai manual, bukan auto-start (agar server
-        # tidak mencuri kamera saat user ingin menjalankan bccare_cam_test.py).
-        # Aktifkan auto-start jika mau:
-        #   sudo systemctl enable bccare_main
-        sudo systemctl restart bccare_main || \
-            warn "bccare_main tidak bisa start (cek: journalctl -u bccare_main -e)"
-        ok "Service terpasang: bccare_main.service"
-    else
-        warn "bccare_main.service tidak ditemukan — lewati instalasi service."
-    fi
-else
-    bold "[5/5] (check) Lewati konfigurasi service."
-fi
+sudo systemctl enable --now bluetooth
 
 # ── Verifikasi ──────────────────────────────────────────────────────────────
 bold "Verifikasi import..."
@@ -119,6 +90,7 @@ check() {
 }
 check numpy
 check PIL
+check bluetooth     # PyBluez (opsional → hanya warn)
 check picamera2
 
 # GPIO: RPi.GPIO ATAU rpi-lgpio cukup
@@ -128,6 +100,11 @@ elif $PY -c "import lgpio" 2>/dev/null; then
     ok "rpi-lgpio (shim RPi.GPIO)"
 else
     warn "RPi.GPIO/rpi-lgpio — tombol fisik tidak akan berfungsi"
+fi
+
+# PyBluez opsional → hanya warning
+if ! $PY -c "import bluetooth" 2>/dev/null; then
+    warn "PyBluez tidak ada — pakai fallback native (Android konek by-address setelah pairing)"
 fi
 
 # ML: salah satu dari tflite_runtime ATAU tensorflow cukup
@@ -143,9 +120,6 @@ if [[ $MISSING -eq 0 ]]; then
     bold "Semua dependency inti OK. Jalankan server dengan:"
     echo "    source ~/bccare_venv/bin/activate"
     echo "    python bccare_main.py"
-    echo
-    echo "  Pastikan Bluetooth aktif dan Pi sudah dipasangkan dengan Android."
-    echo "  lalu tersambungkan HP ke SSID BC-Care-Probe."
 else
     warn "Ada dependency inti yang belum terpasang — lihat pesan GAGAL di atas."
     exit 1

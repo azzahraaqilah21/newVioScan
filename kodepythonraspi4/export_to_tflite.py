@@ -90,166 +90,211 @@ def _load_keras_model_robust(path):
 
 def strip_augmentation(model):
     """
-    Buang layer augmentasi acak dari depan model.
-    Return (model_baru, daftar_layer_yang_dibuang).
+    Buang blok augmentasi Random* termasuk yang berada
+    di dalam Sequential/Functional nested model.
+
+    Return:
+        (model_baru, daftar_layer_yang_dibuang)
     """
     import tensorflow as tf
 
-    # Cari layer-layer awal bertipe Random*
-    to_remove = []
-    for layer in model.layers:
-        if type(layer).__name__ in RANDOM_LAYER_CLASSES:
-            to_remove.append(layer)
-        elif to_remove:
-            # Sudah lewat blok augmentasi (bloknya selalu berurutan dari depan)
-            break
+    removed = []
 
-    if not to_remove:
+    def find_random_layers(layer, prefix=""):
+        name = f"{prefix}{layer.name}"
+
+        # Cek layer langsung
+        if type(layer).__name__ in RANDOM_LAYER_CLASSES:
+            removed.append(name)
+
+        # Cek nested model / Sequential
+        if hasattr(layer, "layers"):
+            for child in layer.layers:
+                find_random_layers(child, prefix=name + "/")
+
+    # Cari seluruh Random* secara rekursif
+    for layer in model.layers:
+        find_random_layers(layer)
+
+    if not removed:
         print("  [OK] Tidak ada layer augmentasi acak — model siap konversi.")
         return model, []
 
-    print(f"  [STRIP] Membuang {len(to_remove)} layer augmentasi: "
-          f"{[type(l).__name__ for l in to_remove]}")
-    print("  (Layer ini tidak punya bobot, aman dibuang. Augmentasi seharusnya "
-          "hanya saat TRAINING, bukan inferensi.)")
+    print(f"  [STRIP] Ditemukan {len(removed)} layer augmentasi acak:")
+    for name in removed:
+        print(f"      - {name}")
 
-    # Rekonstruksi model: output dari layer terakhir SEBELUM blok augmentasi
+    print("  [STRIP] Augmentasi training akan dilewati saat inferensi.")
+
+    # Untuk model BC-Care:
+    # augmentasi berada pada Sequential pertama setelah InputLayer.
     inp = model.inputs[0]
     x = inp
-    # InputLayer tidak menghasilkan tensor baru; cari layer konkrit pertama
-    for layer in model.layers:
-        if type(layer).__name__ in ("InputLayer",) or type(layer).__name__ in RANDOM_LAYER_CLASSES:
-            continue
-        x = layer(x)
-        break
+    skipped = False
 
-    # Sisa layer setelah blok augmentasi
-    past_aug = False
     for layer in model.layers:
-        if type(layer).__name__ in RANDOM_LAYER_CLASSES:
-            past_aug = True
-            continue
         if type(layer).__name__ == "InputLayer":
             continue
-        if not past_aug:
-            continue  # sudah direbuild di atas
+
+        # Jika layer adalah Sequential/Functional yang seluruh isinya
+        # berupa Random* augmentation, lewati layer tersebut.
+        nested_types = []
+
+        if hasattr(layer, "layers"):
+            for child in layer.layers:
+                nested_types.append(type(child).__name__)
+
+        is_random_block = (
+            nested_types
+            and all(t in RANDOM_LAYER_CLASSES for t in nested_types)
+        )
+
+        if type(layer).__name__ in RANDOM_LAYER_CLASSES:
+            skipped = True
+            continue
+
+        if is_random_block:
+            print(f"  [STRIP] Melewati blok augmentasi: {layer.name}")
+            skipped = True
+            continue
+
+        # Layer normal tetap dipertahankan
         x = layer(x)
 
-    # Jika blok augmentasi berada di dalam submodel Sequential (umum di
-    # pipeline Keras 3: Functional(Sequential[aug], Functional[backbone])),
-    # pendekatan layer-by-layer di atas bisa gagal → fallback: rebuild via
-    # functional API pada submodel.
-    try:
-        new_model = tf.keras.Model(inp, x, name=model.name + "_noaug")
-        return new_model, [type(l).__name__ for l in to_remove]
-    except Exception as e:
-        print(f"  [WARN] Rebuild langsung gagal ({e}); coba jalur submodel...")
+    new_model = tf.keras.Model(
+        inputs=inp,
+        outputs=x,
+        name=model.name + "_no_augmentation"
+    )
 
-    # ── Fallback: telusuri submodel yang memuat Random* ──────────────────────
-    # Pola: model.layers = [InputLayer, Sequential(aug), Functional(backbone), ...]
-    parts = [l for l in model.layers if type(l).__name__ not in ("InputLayer",)]
-    kept = []
-    for l in parts:
-        if type(l).__name__ in RANDOM_LAYER_CLASSES:
-            continue
-        if hasattr(l, "layers") and any(
-                type(sub).__name__ in RANDOM_LAYER_CLASSES for sub in getattr(l, "layers", [])):
-            # Sequential berisi augmentasi → buang sub-layer Random*-nya saja
-            inner = [sub for sub in l.layers
-                     if type(sub).__name__ not in RANDOM_LAYER_CLASSES]
-            if not inner:
-                continue
-            l = tf.keras.Sequential(inner, name=l.name + "_noaug")
-        kept.append(l)
+    print("  [OK] Model baru berhasil dibuat tanpa blok augmentasi.")
+    print(f"  [OK] Layer yang terdeteksi: {len(removed)}")
 
-    x = inp
-    for l in kept:
-        x = l(x)
-    new_model = tf.keras.Model(inp, x, name=model.name + "_noaug")
-    return new_model, [type(l).__name__ for l in to_remove]
-
+    return new_model, removed
 
 def strip_mixed_precision(model):
     """
-    Model yang dilatih dengan policy mixed_float16 menyimpan compute dtype f16
-    di layer-layer-nya (variabel master umumnya tetap fp32). TFLite builtin
-    TIDAK mendukung math fp16 → converter error "ERROR_NEEDS_FLEX_OPS" untuk
-    tf.Conv2D/tf.BiasAdd/tf.Mul/tf.Sigmoid (persis seperti di SE-block
-    EfficientNet).
+    Paksa seluruh model dan nested model menjadi float32.
 
-    Solusi: ambil config model (nested), telusuri rekursif dan ganti semua
-    "dtype": "float16" → "float32", rebuild model dari config, salin bobot.
-    Rekursif WAJIB karena EfficientNetB3 adalah nested Functional model —
-    clone_model/clone_function biasa hanya menyentuh layer top-level dan
-    layer dalam backbone akan tetap f16 dari config aslinya.
-    Return (model_baru, True jika ada perubahan).
+    Model BC-Care menggunakan EfficientNetB3 nested Functional dengan
+    compute dtype float16. Fungsi ini membersihkan konfigurasi dtype
+    secara rekursif, kemudian rebuild dan menyalin bobot asli.
     """
     import tensorflow as tf
 
-    def _iter_all_layers(layers):
-        for l in layers:
-            yield l
-            inner = getattr(l, "layers", None)
+    def iter_all_layers(layers):
+        for layer in layers:
+            yield layer
+            inner = getattr(layer, "layers", None)
             if inner:
-                yield from _iter_all_layers(inner)
+                yield from iter_all_layers(inner)
 
-    # Deteksi: variabel f16 ATAU compute dtype f16 di layer mana pun (nested
-    # submodel seperti EfficientNetB3 ikut ditelusuri).
-    has_f16 = (
-        any(v.dtype == tf.float16 for v in model.weights)
-        or any(getattr(l, "compute_dtype", None) == tf.float16
-               for l in _iter_all_layers(model.layers))
-    )
-    if not has_f16:
+    def has_float16(m):
+        for layer in iter_all_layers(m.layers):
+            try:
+                if "float16" in str(layer.compute_dtype).lower():
+                    return True
+            except Exception:
+                pass
+
+        for weight in m.weights:
+            if weight.dtype == tf.float16:
+                return True
+
+        return False
+
+    if not has_float16(model):
+        print("  [OK] Model sudah float32.")
         return model, False
 
-    print("  [FIX] Model mixed_float16 (compute dtype f16 terdeteksi) → "
-          "rebuild seluruh model sebagai float32 sebelum konversi TFLite...")
+    print(
+        "  [FIX] Float16 terdeteksi → membersihkan dtype "
+        "secara rekursif dan rebuild model sebagai float32..."
+    )
 
+    # Pastikan policy global float32
     tf.keras.mixed_precision.set_global_policy("float32")
 
-    def _force_fp32_in_config(cfg):
-        """Telusuri config (nested) & ganti semua dtype float16 → float32."""
+    def force_float32(cfg):
         if isinstance(cfg, dict):
-            out = {}
-            for k, v in cfg.items():
-                if k == "dtype" and isinstance(v, str) and "float16" in v:
-                    out[k] = "float32"
+            result = {}
+
+            for key, value in cfg.items():
+                if key == "dtype":
+                    # Semua variasi mixed_float16 / float16
+                    # dipaksa menjadi float32.
+                    result[key] = "float32"
                 else:
-                    out[k] = _force_fp32_in_config(v)
-            return out
-        if isinstance(cfg, (list, tuple)):
-            return type(cfg)(_force_fp32_in_config(v) for v in cfg) \
-                if isinstance(cfg, list) else [_force_fp32_in_config(v) for v in cfg]
+                    result[key] = force_float32(value)
+
+            return result
+
+        if isinstance(cfg, list):
+            return [force_float32(x) for x in cfg]
+
+        if isinstance(cfg, tuple):
+            return tuple(force_float32(x) for x in cfg)
+
         return cfg
 
-    weights = model.get_weights()  # bobot master (fp32) dari file .keras
+    # Simpan bobot asli
+    weights = model.get_weights()
+
+    print("  [FIX] Membersihkan konfigurasi nested model...")
 
     try:
-        cfg = _force_fp32_in_config(model.get_config())
-        rebuilt = model.__class__.from_config(cfg)
-        rebuilt.set_weights(weights)
-    except Exception as e:
-        print(f"  [WARN] Rebuild via config gagal ({e}) — coba clone_model...")
-        try:
-            rebuilt = tf.keras.models.clone_model(model)
-            rebuilt.set_weights(weights)
-        except Exception as e2:
-            print(f"  [WARN] clone_model juga gagal ({e2}) — konversi dilanjutkan "
-                  f"dengan model asli (kemungkinan tetap gagal atas fp16).")
-            return model, False
+        clean_config = force_float32(model.get_config())
 
-    # Sanitas: tak boleh tersisa f16
-    leftover_vars = [v for v in rebuilt.weights if v.dtype == tf.float16]
-    leftover_layers = [l.name for l in _iter_all_layers(rebuilt.layers)
-                       if getattr(l, "compute_dtype", None) == tf.float16]
-    if leftover_vars or leftover_layers:
-        print(f"  [WARN] Masih tersisa f16 (vars={len(leftover_vars)}, "
-              f"layers={leftover_layers[:5]}) — konversi dilanjutkan dengan "
-              f"model asli.")
+        rebuilt = model.__class__.from_config(clean_config)
+
+        # Build model dengan shape input asli
+        try:
+            rebuilt.build(model.input_shape)
+        except Exception:
+            pass
+
+        rebuilt.set_weights(weights)
+
+    except Exception as e:
+        print(f"  [WARN] Rebuild float32 gagal: {e}")
+        print("  [WARN] Model asli dipertahankan.")
         return model, False
 
-    print("  [FIX] Model sekarang full float32 (bobot master tersalin).")
+    # Verifikasi seluruh nested layer
+    leftover_layers = []
+
+    for layer in iter_all_layers(rebuilt.layers):
+        try:
+            dtype = str(layer.compute_dtype).lower()
+
+            if "float16" in dtype:
+                leftover_layers.append(
+                    f"{layer.name} ({layer.compute_dtype})"
+                )
+        except Exception:
+            pass
+
+    leftover_vars = [
+        w for w in rebuilt.weights
+        if w.dtype == tf.float16
+    ]
+
+    if leftover_layers or leftover_vars:
+        print(
+            f"  [WARN] Masih tersisa float16: "
+            f"layers={len(leftover_layers)}, vars={len(leftover_vars)}"
+        )
+
+        for item in leftover_layers[:10]:
+            print("      -", item)
+
+        print("  [WARN] Model asli dipertahankan.")
+        return model, False
+
+    print("  [OK] Model berhasil menjadi full float32.")
+    print("  [OK] Tidak ada compute dtype float16.")
+    print("  [OK] Tidak ada weight float16.")
+
     return rebuilt, True
 
 
@@ -537,7 +582,7 @@ def convert_keras_to_tflite(verify=True):
     print("\n" + "=" * 60)
     if all_ok:
         print("SELESAI — salin kedua file .tflite ke Raspberry Pi:")
-        print("  scp bccare_*.tflite <user>@<ip>:~/kodepythonraspi4/")
+        print("  scp bccare_*.tflite bccare@<ip>:/home/bccare/kodepythonraspi4/")
     else:
         print("SEBAGIAN GAGAL — periksa log di atas sebelum deploy.")
     print("=" * 60)

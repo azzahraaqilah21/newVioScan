@@ -25,11 +25,9 @@ import os
 import time
 import json
 
-# DB disimpan di ~/bccare_captures (bukan /home/bccare yang mungkin belum
-# ada / beda username). Override via env bila perlu.
 DB_PATH = os.environ.get(
     "BCCARE_DB_PATH",
-    os.path.join(os.path.expanduser("~"), "bccare_captures", "bccare.db"),
+    "/home/bccare/bccare_captures/bccare.db",
 )
 
 

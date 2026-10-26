@@ -1,25 +1,25 @@
 [Unit]
-Description=BC-Care Main Server (Bluetooth Classic SPP)
+Description=BC-Care VioScan - server Bluetooth & kontrol alat (bccare_main.py)
+# Kode & model ada di SD card (/mnt/data) - tunggu sampai ter-mount.
+RequiresMountsFor=/mnt/data/backup-pi/kodepythonraspi4
 After=bluetooth.service
 Wants=bluetooth.service
 
 [Service]
 Type=simple
-# Jalankan dari direktori tempat bccare_main.py berada agar path DB/capture
-# ($HOME/bccare_captures) konsisten dengan USER di bawah.
-WorkingDirectory=/home/padilkyun/kodepythonraspi4
-Environment="PYTHONUNBUFFERED=1"
-ExecStart=/usr/bin/python3 /home/padilkyun/kodepythonraspi4/bccare_main.py
+User=tes
+Group=tes
+WorkingDirectory=/mnt/data/backup-pi/kodepythonraspi4
+Environment=PYTHONUNBUFFERED=1
+# Tunggu adapter Bluetooth muncul (maks 30 dtk) agar server tidak start
+# sebelum hci0 siap saat boot. Tanda "-" = gagal pun tetap lanjut.
+ExecStartPre=-/usr/bin/timeout 30 /bin/sh -c 'until bluetoothctl show 2>/dev/null | grep -q Controller; do sleep 1; done'
+ExecStart=/usr/bin/python3 /mnt/data/backup-pi/kodepythonraspi4/bccare_main.py
+# SIGINT = Ctrl+C -> blok finally di bccare_main.py jalan (lepas kamera, GPIO.cleanup).
+KillSignal=SIGINT
+TimeoutStopSec=15
 Restart=on-failure
-RestartSec=3
-# PyBluez memakai SDP saat advertise_service; CAP_NET_RAW diperlukan pada
-# sebagian versi BlueZ agar record SPP dapat didaftarkan tanpa menjalankan root.
-AmbientCapabilities=CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_RAW
-# dijalankan non-privileged; pastikan user ini punya akses ke /dev/gpiomem
-# dan grup video (kamera). Sesuaikan USER/GROUP dengan user login Pi.
-User=padilkyun
-Group=padilkyun
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

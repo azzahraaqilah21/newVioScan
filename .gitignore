@@ -71,3 +71,9 @@ find
 .claude/
 .artifacts/
 *.bak
+
+# Model AI BC-Care (puluhan MB) — bagikan lewat Google Drive, bukan Git.
+*.tflite
+# Output build Gradle & cache Python
+/android/build/
+__pycache__/

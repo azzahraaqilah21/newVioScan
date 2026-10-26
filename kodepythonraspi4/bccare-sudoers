@@ -1,0 +1,3 @@
+# BC-Care: izinkan bccare_main.py (user tes) mematikan Pi lewat tombol fisik
+# (tahan 8 detik) dan menyalakan Bluetooth, tanpa password.
+tes ALL=(root) NOPASSWD: /usr/sbin/shutdown, /usr/bin/bluetoothctl
