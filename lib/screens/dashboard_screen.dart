@@ -241,9 +241,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
                     final deviceName = connectedDevice?.name ?? 'BC-Care UV-Scan Pro';
 
-                    return GestureDetector(
-                      onTap: () => widget.navigate('hardware'),
-                      child: Container(
+                    // Hanya status — koneksi alat dibuka lewat Skrining Baru
+                    // (Skin Risk Assessment → Info Lesi → Koneksi).
+                    return Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 12),
                         decoration: BoxDecoration(
@@ -283,7 +283,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                                     ),
                                   ),
                                   Text(
-                                    isConnected ? deviceName : 'Ketuk untuk hubungkan via Bluetooth',
+                                    isConnected ? deviceName : 'Belum terhubung',
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.w600,
@@ -336,7 +336,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                             ),
                           ],
                         ),
-                      ),
                     );
                   },
                 ),

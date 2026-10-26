@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../providers/screening_provider.dart';
 import '../providers/device_provider.dart';
 import '../models/screening_model.dart';
+import '../services/report_service.dart';
 
 class ScanResultScreen extends ConsumerStatefulWidget {
   final Function(String) navigate;
@@ -29,6 +30,9 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
   String riskLevel = 'moderate';
   bool _isSaved = false;
   bool _isSaving = false;
+  bool _membuatLaporan = false;
+  // Salinan lengkap yang tersimpan (form dikosongkan setelah Simpan).
+  ScreeningModel? _savedModel;
   late AnimationController _arcController;
   late Animation<double> _arcAnimation;
 
@@ -225,6 +229,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     setState(() {
       riskLevel = level;
       _isSaved = false;
+      _savedModel = null;
     });
     _arcController.forward(from: 0);
   }
@@ -280,6 +285,63 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     ];
   }
 
+  /// Hasil alat + data form (lokasi, catatan, Skin Risk Assessment).
+  /// Setelah Simpan form dikosongkan, jadi dipakai salinan yang tersimpan.
+  ScreeningModel _hasilLengkap(ScreeningModel hw) {
+    if (widget.fromHistory) return hw;
+    if (_savedModel != null) return _savedModel!;
+    final lesionInfo = ref.read(lesionInfoProvider);
+    return hw.copyWith(
+      lesionLocation: lesionInfo?.location ?? 'Lesi Kulit',
+      lesionNotes: lesionInfo?.notes,
+      clinicalRiskAssessment: ref.read(clinicalAssessmentProvider),
+    );
+  }
+
+  /// Tombol Download (unduh: true) & Share di header — laporan PDF.
+  Future<void> _laporanPdf({required bool unduh}) async {
+    final hw = widget.fromHistory
+        ? ref.read(historyViewProvider)
+        : ref.read(latestHardwareResultProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    if (hw == null) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Belum ada hasil dari alat. Laporan tidak dibuat.'),
+        backgroundColor: Color(0xFFD97706),
+      ));
+      return;
+    }
+    if (_membuatLaporan) return;
+    setState(() => _membuatLaporan = true);
+    try {
+      final model = _hasilLengkap(hw);
+      final pdf = await ReportService.buatPdf(
+        model,
+        analisis: _analisisBcCare(model),
+        rekomendasi: recommendations[model.riskLevel] ?? const {},
+      );
+      final nama = ReportService.namaFile(model);
+      if (unduh) {
+        final path = await ReportService.simpanKeDownload(pdf, nama);
+        messenger.showSnackBar(SnackBar(
+          content: Text(path.contains('/Download/')
+              ? 'Laporan tersimpan di folder Download: $nama'
+              : 'Laporan tersimpan: $path'),
+          backgroundColor: const Color(0xFF059669),
+        ));
+      } else {
+        await ReportService.bagikan(pdf, nama);
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Gagal membuat laporan PDF: $e'),
+        backgroundColor: Colors.red,
+      ));
+    } finally {
+      if (mounted) setState(() => _membuatLaporan = false);
+    }
+  }
+
   /// Keluar dari layar hasil. Hasil yang sudah disimpan baru dibersihkan di
   /// sini (bukan saat Simpan) agar foto tetap terlihat, dan tidak tersimpan
   /// dua kali saat layar ini dibuka lagi.
@@ -302,8 +364,6 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
 
     try {
       final user = ref.read(authStateProvider).value;
-      final lesionInfo = ref.read(lesionInfoProvider);
-      final clinicalData = ref.read(clinicalAssessmentProvider);
       final hwResult = ref.read(latestHardwareResultProvider);
 
       // Tanpa hasil dari alat, layar hanya menampilkan contoh per tingkat
@@ -322,16 +382,11 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
         return;
       }
 
-      final model = hwResult
-          // FIX: userId & info lesi dari form/auth WAJIB dipakai — sebelumnya
-          // hasil hardware disimpan dengan userId 'local_patient' & lokasi
-          // generik, sehingga riwayat/statistik user tidak pernah terisi.
-          .copyWith(
-            userId: user?.uid ?? 'offline_user',
-            lesionLocation: lesionInfo?.location ?? 'Lesi Kulit',
-            lesionNotes: lesionInfo?.notes,
-            clinicalRiskAssessment: clinicalData,
-          );
+      // FIX: userId & info lesi dari form/auth WAJIB dipakai — sebelumnya
+      // hasil hardware disimpan dengan userId 'local_patient' & lokasi
+      // generik, sehingga riwayat/statistik user tidak pernah terisi.
+      final model = _hasilLengkap(hwResult)
+          .copyWith(userId: user?.uid ?? 'offline_user');
 
       // Foto ikut tersimpan di dokumen Firestore yang sama (lihat
       // ScreeningModel.toMap) — tanpa Firebase Storage / paket Blaze.
@@ -366,7 +421,10 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
       // Refresh stats jika online
       ref.invalidate(userStatsProvider);
 
-      setState(() => _isSaved = true);
+      setState(() {
+        _isSaved = true;
+        _savedModel = model;
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -418,6 +476,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
         setState(() {
           riskLevel = next.riskLevel;
           _isSaved = false; // hasil baru → tombol simpan aktif lagi
+          _savedModel = null;
         });
         _arcController.forward(from: 0);
       }
@@ -532,16 +591,31 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                     ),
                     Row(
                       children: [
-                        for (final ico in [Icons.share_rounded, Icons.save_alt_rounded])
-                          Container(
-                            margin: const EdgeInsets.only(left: 8),
-                            width: 38,
-                            height: 38,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFFF0FAFA),
-                              shape: BoxShape.circle,
+                        // Share & Download laporan PDF
+                        for (final (ico, unduh) in [
+                          (Icons.share_rounded, false),
+                          (Icons.save_alt_rounded, true),
+                        ])
+                          GestureDetector(
+                            onTap: () => _laporanPdf(unduh: unduh),
+                            child: Container(
+                              margin: const EdgeInsets.only(left: 8),
+                              width: 38,
+                              height: 38,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFF0FAFA),
+                                shape: BoxShape.circle,
+                              ),
+                              child: _membuatLaporan
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(11),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Color(0xFF0A858C),
+                                      ),
+                                    )
+                                  : Icon(ico, color: const Color(0xFF0A858C), size: 16),
                             ),
-                            child: Icon(ico, color: const Color(0xFF0A858C), size: 16),
                           ),
                       ],
                     ),

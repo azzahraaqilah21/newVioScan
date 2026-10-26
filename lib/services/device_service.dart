@@ -84,6 +84,20 @@ class DeviceService {
     }
   }
 
+  /// Pesan singkat dari alat yang ditampilkan di layar mana pun (SnackBar),
+  /// mis. tombol fisik ditekan di luar halaman Pemindaian.
+  final _noticeController = StreamController<String>.broadcast();
+  Stream<String> get noticeStream => _noticeController.stream;
+
+  /// Halaman Pemindaian ditinggalkan: alat mematikan LED UV/putih dan
+  /// menolak tombol fisik sampai PREPARE_SCAN berikutnya.
+  Future<void> sendEndScanCommand() async {
+    _setPrepared(false);
+    if (_connection?.isConnected == true) {
+      await sendCommand(jsonEncode({'command': 'END_SCAN'}));
+    }
+  }
+
   Stream<DeviceConnectionState> get statusStream =>
       _statusController.stream;
   Stream<List<DeviceInfo>> get scanResults =>
@@ -876,6 +890,15 @@ class DeviceService {
           _completeShutdown(null);
           break;
 
+        case 'scan_rejected':
+          // Tombol fisik ditekan saat aplikasi tidak di halaman Pemindaian.
+          if (!_disposed) {
+            _noticeController.add(
+              json['msg'] as String? ?? 'Pemindaian ditolak oleh alat.',
+            );
+          }
+          break;
+
         case 'scan_warning':
           _lastWarningMessage = json['msg'] as String? ?? '';
 
@@ -916,5 +939,6 @@ class DeviceService {
     _progressController.close();
     _preparedController.close();
     _deviceInfoController.close();
+    _noticeController.close();
   }
 }

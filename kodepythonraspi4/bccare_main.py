@@ -4,12 +4,20 @@ BCcare - Alat Pencitraan & Deteksi Lesi Kulit Berbasis Raspberry Pi 4
 Fitur:
   1. Dual-mode iluminasi: LED UV 365nm & LED Putih (Dermoskopi)
   2. Klasifikasi biner: NORMAL vs BCC via EfficientNetB3 (TFLite / Keras)
-  3. Dua LED indikator fisik:
-       - GPIO 22 (Hijau): NORMAL
-       - GPIO 25 (Merah): BCC
+  3. Satu LED indikator merah (GPIO 22) — menunjukkan proses, BUKAN hasil:
+       - 1x kedip panjang  : alat baru aktif
+       - menyala terus     : scan sedang berjalan (foto + AI)
+       - 3x kedip          : scan selesai
+       - 2x kedip          : mode cahaya berganti
+       - 5x kedip cepat    : gagal (kamera error, foto tidak layak, scan ditolak)
+       - 4x kedip panjang  : alat sedang shutdown
+     LED UV/putih menyala saat halaman Pemindaian dibuka (PREPARE_SCAN),
+     mati setelah foto diambil atau saat halaman ditinggalkan (END_SCAN).
   4. Sensor ultrasonik HC-SR04 untuk estimasi ketebalan/elevasi lesi
   5. Bluetooth SPP (RFCOMM) → streaming progress + hasil ke Android
-  6. Push-button state machine (1-klik, 2-klik, tahan)
+  6. Push-button: 1-klik scan, 2-klik ganti mode, tahan 8 detik shutdown.
+     Saat HP terhubung, scan dari tombol hanya diterima jika aplikasi sedang
+     di halaman Pemindaian (setelah Skin Risk Assessment).
 
 Protokol Bluetooth (JSON + newline):
   Android → Raspi : {"command":"START_SCAN","mode":"uv"}\n
@@ -75,8 +83,7 @@ with open(PIDFILE, "w") as f:
 # ================================================================
 PIN_LED_UV          = 17   # LED UV 365nm
 PIN_LED_WHITE       = 27   # LED Cahaya Putih
-PIN_LED_DISEASE_1   = 22   # Indikator NORMAL / Jinak  (Hijau)
-PIN_LED_DISEASE_2   = 25   # Indikator BCC / Malignant (Merah)
+PIN_LED_INDIKATOR   = 22   # LED merah indikator proses
 PIN_TRIG            = 23   # Ultrasonik TRIG
 PIN_ECHO            = 24   # Ultrasonik ECHO
 PIN_BUTTON          = 18   # Push button multi-fungsi
@@ -85,9 +92,19 @@ PIN_BUTTON          = 18   # Push button multi-fungsi
 # KONFIGURASI TOMBOL
 # ================================================================
 DOUBLE_CLICK_WINDOW   = 0.4   # detik — jendela deteksi klik ganda
-LONG_PRESS_THRESHOLD  = 0.8   # detik — tahan untuk ukur lesi
-RECALIBRATE_THRESHOLD = 3.0   # detik — tahan untuk kalibrasi ulang
+LONG_PRESS_THRESHOLD  = 0.8   # detik — tahan 0.8–8 detik: tidak ada fungsi
 SHUTDOWN_THRESHOLD    = 8.0   # detik — tahan untuk shutdown
+
+# Pola kedip LED indikator (detik)
+BLINK_ON        = 0.15
+BLINK_OFF       = 0.15
+BLINK_ERROR_ON  = 0.05
+BLINK_ERROR_OFF = 0.05
+
+# Batas foto layak dianalisis AI (lihat bccare_ml.analisis_citra)
+BATAS_TAJAM_MIN  = 20.0    # di bawah ini = buram → ditolak
+BATAS_TERANG_MIN = 30.0    # di bawah ini = terlalu gelap → ditolak
+BATAS_TERANG_MAX = 210.0   # di atas ini = terlalu terang → ditolak
 
 # ================================================================
 # KONFIGURASI ULTRASONIK
@@ -117,7 +134,7 @@ try:
     import RPi.GPIO as GPIO
     is_rpi = True
     GPIO.setmode(GPIO.BCM)
-    for pin_out in [PIN_LED_UV, PIN_LED_WHITE, PIN_LED_DISEASE_1, PIN_LED_DISEASE_2, PIN_TRIG]:
+    for pin_out in [PIN_LED_UV, PIN_LED_WHITE, PIN_LED_INDIKATOR, PIN_TRIG]:
         GPIO.setup(pin_out, GPIO.OUT)
         GPIO.output(pin_out, GPIO.LOW)
     GPIO.setup(PIN_ECHO,   GPIO.IN)
@@ -194,7 +211,11 @@ current_mode     = "uv"
 jarak_referensi  = 0.0
 referensi_valid  = False
 alat_aktif       = False
+# True selama aplikasi di halaman Pemindaian (PREPARE_SCAN … END_SCAN).
+# Saat HP terhubung, tombol fisik hanya boleh scan jika ini True.
+siap_scan        = False
 scan_lock = threading.Lock()   # cegah dua scan bersamaan (tombol + START_SCAN Android)
+indikator_lock = threading.Lock()  # pola kedip LED merah tidak saling tumpuk
 terakhir_ultrasonik = {
     "jarak_referensi": 0.0,
     "jarak_lesi":      0.0,
@@ -210,7 +231,14 @@ classifier = get_classifier()
 
 def on_bluetooth_command(command, params):
     """Callback dari BCCareComm saat Android mengirim perintah."""
-    global current_mode
+    global current_mode, siap_scan
+    if command == "END_SCAN":
+        # Aplikasi meninggalkan halaman Pemindaian.
+        siap_scan = False
+        matikan_iluminasi()
+        print("[BT-CMD] END_SCAN — LED iluminasi mati, tombol fisik terkunci.")
+        return
+
     if command == "SHUTDOWN":
         # Permintaan dari aplikasi = setara tahan tombol fisik 8 detik.
         if scan_lock.locked():
@@ -234,13 +262,12 @@ def on_bluetooth_command(command, params):
         if req_mode in ("uv", "white") and req_mode != current_mode:
             current_mode = req_mode
 
-        # Pastikan alat aktif & LED iluminasi menyala SEBELUM foto diambil.
-        # Tanpa ini, scan dari Android saat alat belum diaktifkan tombol fisik
-        # menghasilkan foto gelap yang tetap diklasifikasi (hasil menyesatkan).
+        # Aplikasi di halaman Pemindaian: alat aktif, LED iluminasi menyala
+        # untuk membidik lesi, tombol fisik boleh memulai scan.
         if not alat_aktif:
             aktifkan_alat()
-        else:
-            _update_illumination_leds()
+        siap_scan = True
+        nyalakan_iluminasi()
 
         if command == "PREPARE_SCAN":
             # Alat disiapkan (LED menyala sesuai mode) TAPI TIDAK mengambil foto.
@@ -331,75 +358,83 @@ def info_perangkat():
 
 comm.device_info_provider = info_perangkat
 
+
+def _klien_terputus():
+    """HP terputus: halaman Pemindaian dianggap tertutup."""
+    global siap_scan
+    siap_scan = False
+    matikan_iluminasi()
+
+
+comm.on_client_disconnected = _klien_terputus
+
 # ================================================================
 # KONTROL LED
 # ================================================================
 
-def set_disease_led(disease):
-    """Nyalakan LED indikator sesuai hasil klasifikasi."""
+def indikator(nyala):
+    """LED merah menyala terus (scan sedang berjalan) atau mati."""
     if not is_rpi:
-        pin_str = "GPIO 22 (NORMAL)" if disease == "NORMAL" else "GPIO 25 (BCC)"
-        print(f"[LED-SIM] {pin_str} ON")
+        print(f"[LED-SIM] indikator {'ON' if nyala else 'OFF'}")
         return
-    if disease == "NORMAL":
-        GPIO.output(PIN_LED_DISEASE_1, GPIO.HIGH)
-        GPIO.output(PIN_LED_DISEASE_2, GPIO.LOW)
-    elif disease == "BCC":
-        GPIO.output(PIN_LED_DISEASE_2, GPIO.HIGH)
-        GPIO.output(PIN_LED_DISEASE_1, GPIO.LOW)
-    else:
-        GPIO.output(PIN_LED_DISEASE_1, GPIO.LOW)
-        GPIO.output(PIN_LED_DISEASE_2, GPIO.LOW)
+    with indikator_lock:
+        GPIO.output(PIN_LED_INDIKATOR, GPIO.HIGH if nyala else GPIO.LOW)
 
 
-def reset_disease_leds():
-    if is_rpi:
-        GPIO.output(PIN_LED_DISEASE_1, GPIO.LOW)
-        GPIO.output(PIN_LED_DISEASE_2, GPIO.LOW)
-
-
-def _update_illumination_leds():
-    """Nyalakan LED iluminasi sesuai mode (hanya saat alat aktif)."""
-    if not is_rpi or not alat_aktif:
-        return
-    if current_mode == "uv":
-        GPIO.output(PIN_LED_WHITE, GPIO.LOW)
-        GPIO.output(PIN_LED_UV,    GPIO.HIGH)
-    else:
-        GPIO.output(PIN_LED_UV,    GPIO.LOW)
-        GPIO.output(PIN_LED_WHITE, GPIO.HIGH)
-
-
-def blink_indikator_selesai(led_pin, times=3):
-    """Kedipkan LED hasil beberapa kali di thread terpisah."""
+def kedip_indikator(times, on_time=BLINK_ON, off_time=BLINK_OFF, tunggu=False):
+    """Kedipkan LED merah (pola: lihat docstring di atas file).
+    tunggu=False → berjalan di thread terpisah agar tidak menahan pemanggil."""
     if not is_rpi:
+        print(f"[LED-SIM] indikator kedip {times}x")
         return
-    def _blink():
-        for _ in range(times):
-            GPIO.output(led_pin, GPIO.LOW)
-            time.sleep(0.12)
-            GPIO.output(led_pin, GPIO.HIGH)
-            time.sleep(0.12)
-    threading.Thread(target=_blink, daemon=True).start()
+    def _kedip():
+        with indikator_lock:
+            for _ in range(times):
+                GPIO.output(PIN_LED_INDIKATOR, GPIO.HIGH)
+                time.sleep(on_time)
+                GPIO.output(PIN_LED_INDIKATOR, GPIO.LOW)
+                time.sleep(off_time)
+    if tunggu:
+        _kedip()
+    else:
+        threading.Thread(target=_kedip, daemon=True).start()
+
+
+def kedip_gagal():
+    kedip_indikator(5, BLINK_ERROR_ON, BLINK_ERROR_OFF)
+
+
+def nyalakan_iluminasi():
+    """Nyalakan LED UV atau putih sesuai mode (yang lain dimatikan)."""
+    if not is_rpi:
+        print(f"[LED-SIM] iluminasi {current_mode.upper()} ON")
+        return
+    GPIO.output(PIN_LED_UV,    GPIO.HIGH if current_mode == "uv" else GPIO.LOW)
+    GPIO.output(PIN_LED_WHITE, GPIO.HIGH if current_mode == "white" else GPIO.LOW)
+
+
+def matikan_iluminasi():
+    if not is_rpi:
+        print("[LED-SIM] iluminasi OFF")
+        return
+    GPIO.output(PIN_LED_UV,    GPIO.LOW)
+    GPIO.output(PIN_LED_WHITE, GPIO.LOW)
 
 
 def aktifkan_alat():
     global alat_aktif
     alat_aktif = True
     print("[AKTIVASI] Alat BC-Care aktif. Mode awal: UV (365nm)")
-    _update_illumination_leds()
-    if is_rpi:
-        GPIO.output(PIN_LED_DISEASE_1, GPIO.HIGH)
-        GPIO.output(PIN_LED_DISEASE_2, GPIO.HIGH)
-        time.sleep(0.4)
-        GPIO.output(PIN_LED_DISEASE_1, GPIO.LOW)
-        GPIO.output(PIN_LED_DISEASE_2, GPIO.LOW)
+    kedip_indikator(1, on_time=0.6)
 
 
 def ganti_mode():
     global current_mode
     current_mode = "white" if current_mode == "uv" else "uv"
-    _update_illumination_leds()
+    # LED iluminasi hanya menyala selama halaman Pemindaian terbuka.
+    if siap_scan:
+        nyalakan_iluminasi()
+    kedip_indikator(2)
     print(f"[MODE] Beralih ke: {current_mode.upper()}")
 
 # ================================================================
@@ -439,8 +474,9 @@ def ambil_gambar():
         comm.send_error("Scan sedang berjalan. Tunggu scan selesai.")
         return None
 
+    berhasil = False
     try:
-        reset_disease_leds()
+        indikator(True)   # LED merah menyala terus selama scan
         filename = _get_next_filename()
 
         # Beri tahu Android bahwa scan mulai (dipicu tombol fisik ATAU
@@ -456,12 +492,14 @@ def ambil_gambar():
 
         # Step 1: Persiapan
         comm.send_scan_progress(1, SCAN_TOTAL, SCAN_STEPS[0])
+        nyalakan_iluminasi()
         time.sleep(0.3)  # beri waktu LED stabil
 
         # Step 2: Ambil foto
         comm.send_scan_progress(2, SCAN_TOTAL, SCAN_STEPS[1])
         if kamera_tersedia:
             ok_cap, err_cap = _capture_dengan_timeout(filename)
+            matikan_iluminasi()   # foto sudah diambil → LED UV/putih mati
             if ok_cap:
                 print(f"[KAMERA] Foto tersimpan: {filename}")
             else:
@@ -476,6 +514,19 @@ def ambil_gambar():
             print("[KAMERA] Tidak ada kamera fisik — menggunakan gambar simulasi.")
             comm.send_json({"type": "scan_warning", "msg": "Kamera tidak terdeteksi — gambar simulasi digunakan."})
             filename = _generate_mock_image(filename)
+            matikan_iluminasi()
+
+        # Data asli untuk kartu "Analisis BC-Care" di aplikasi
+        analisis = analisis_citra(filename)
+
+        # Foto buram / terlalu gelap / terlalu terang tidak dianalisis AI —
+        # hasilnya tidak bisa dipercaya. (Gambar simulasi tidak diperiksa.)
+        if kamera_tersedia:
+            masalah = _foto_tidak_layak(analisis)
+            if masalah:
+                print(f"[KUALITAS] Foto ditolak: {masalah} {analisis}")
+                comm.send_error(f"{masalah} Tempelkan probe dengan benar lalu ulangi pemindaian.")
+                return None
 
         # Step 3: Inferensi
         comm.send_scan_progress(3, SCAN_TOTAL, SCAN_STEPS[2])
@@ -489,8 +540,6 @@ def ambil_gambar():
         print(f"[ML] Hasil: {disease} ({confidence:.2%}) [model={model_type}] "
               f"{'(SIMULASI)' if is_simulated else ''}")
 
-        # Data asli untuk kartu "Analisis BC-Care" di aplikasi
-        analisis = analisis_citra(filename)
         analisis["inference_ms"] = ml_result.get("inference_ms")
         analisis["model_type"] = model_type
 
@@ -500,11 +549,6 @@ def ambil_gambar():
                             "msg": "Hasil BUKAN dari inferensi model nyata (model tidak "
                                    "termuat / .keras mengandung augmentasi acak). "
                                    "Jalankan export_to_tflite.py & deploy .tflite."})
-
-        # Nyalakan LED fisik
-        set_disease_led(disease)
-        target_pin = PIN_LED_DISEASE_2 if disease == "BCC" else PIN_LED_DISEASE_1
-        blink_indikator_selesai(target_pin, times=2)
 
         # Simpan ke SQLite
         simpan_hasil_klasifikasi(
@@ -529,9 +573,32 @@ def ambil_gambar():
             analysis=analisis,
         )
 
+        berhasil = True
         return ml_result
     finally:
+        matikan_iluminasi()
+        indikator(False)
+        # Selesai: 3x kedip. Gagal (kamera error, foto ditolak, exception): 5x cepat.
+        if berhasil:
+            kedip_indikator(3)
+        else:
+            kedip_gagal()
         scan_lock.release()
+
+
+def _foto_tidak_layak(analisis):
+    """Alasan foto ditolak (str), atau None jika layak dianalisis AI."""
+    tajam = analisis.get("sharpness")
+    terang = analisis.get("brightness")
+    if tajam is None or terang is None:
+        return "Foto gagal dibaca."
+    if tajam < BATAS_TAJAM_MIN:
+        return "Foto buram."
+    if terang < BATAS_TERANG_MIN:
+        return "Foto terlalu gelap."
+    if terang > BATAS_TERANG_MAX:
+        return "Foto terlalu terang."
+    return None
 
 
 def _generate_mock_image(filepath):
@@ -669,10 +736,8 @@ def _izin_shutdown_ada():
 
 def matikan_alat_dengan_aman():
     print("[SHUTDOWN] Mematikan alat...")
-    reset_disease_leds()
-    if is_rpi:
-        GPIO.output(PIN_LED_UV,    GPIO.LOW)
-        GPIO.output(PIN_LED_WHITE, GPIO.LOW)
+    matikan_iluminasi()
+    kedip_indikator(4, on_time=0.4, off_time=0.4, tunggu=True)
     comm.stop()
     if kamera_tersedia and picam2:
         picam2.stop()
@@ -704,10 +769,8 @@ def button_loop():
                 matikan_alat_dengan_aman()
             elif not alat_aktif:
                 aktifkan_alat()
-            elif held_duration >= RECALIBRATE_THRESHOLD:
-                kalibrasi_referensi()
             elif held_duration >= LONG_PRESS_THRESHOLD:
-                ukur_lesi()
+                pass   # tahan 0.8–8 detik: tidak ada fungsi (ultrasonik tidak dipakai)
             else:
                 release_time = time.time()
                 if pending_single_click and (release_time - last_release_time) <= DOUBLE_CLICK_WINDOW:
@@ -719,9 +782,21 @@ def button_loop():
 
         if pending_single_click and (time.time() - last_release_time) > DOUBLE_CLICK_WINDOW:
             pending_single_click = False
-            # Jalankan scan di thread terpisah agar inferensi ML (beberapa detik)
-            # tidak memblokir loop tombol (deteksi shutdown/long-press jadi lambat).
-            threading.Thread(target=ambil_gambar_dengan_error_handling, daemon=True).start()
+            if comm.client_sock is not None and not siap_scan:
+                # HP terhubung tetapi aplikasi tidak di halaman Pemindaian:
+                # scan hanya boleh setelah Skin Risk Assessment.
+                print("[TOMBOL] Scan ditolak — aplikasi belum di halaman Pemindaian.")
+                kedip_gagal()
+                comm.send_json({
+                    "type": "scan_rejected",
+                    "msg": "Tombol alat ditekan, tetapi pemindaian hanya bisa dari "
+                           "halaman Pemindaian. Mulai lewat Skrining Baru "
+                           "(Skin Risk Assessment).",
+                })
+            else:
+                # Jalankan scan di thread terpisah agar inferensi ML (beberapa detik)
+                # tidak memblokir loop tombol (deteksi shutdown/long-press jadi lambat).
+                threading.Thread(target=ambil_gambar_dengan_error_handling, daemon=True).start()
 
         time.sleep(0.01)
 
@@ -733,8 +808,7 @@ if __name__ == "__main__":
     try:
         print("=" * 60)
         print("  BC-CARE — DETEKSI KANKER KULIT (BCC) VIA RASPBERRY PI 4  ")
-        print(f"  LED NORMAL : GPIO {PIN_LED_DISEASE_1} (Hijau)")
-        print(f"  LED BCC    : GPIO {PIN_LED_DISEASE_2} (Merah)")
+        print(f"  LED Merah  : GPIO {PIN_LED_INDIKATOR} (indikator proses)")
         print(f"  LED UV     : GPIO {PIN_LED_UV} (365nm)")
         print(f"  LED Putih  : GPIO {PIN_LED_WHITE}")
         print("=" * 60)

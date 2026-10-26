@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/device_provider.dart';
 import '../services/device_service.dart';
 import '../widgets/bottom_nav.dart';
+import 'hardware_connection_screen.dart' show matikanAlatDenganKonfirmasi;
 
 class DeviceInfoScreen extends ConsumerStatefulWidget {
   final Function(String) navigate;
@@ -359,8 +360,32 @@ class _DeviceInfoScreenState extends ConsumerState<DeviceInfoScreen>
                         border: Border.all(color: const Color(0xFFE5E7EB)),
                       ),
                       child: const Text(
-                        'Alat belum terhubung. Hubungkan BC-Care lewat Bluetooth untuk melihat data perangkat (nomor seri, suhu, daya, kamera, dan model AI).',
+                        'Alat belum terhubung. Alat dihubungkan lewat Skrining Baru (Skin Risk Assessment → Info Lesi → Koneksi). Setelah terhubung, data perangkat (nomor seri, suhu, daya, kamera, dan model AI) tampil di sini.',
                         style: TextStyle(color: Color(0xFF6B7280), fontSize: 12, height: 1.5),
+                      ),
+                    )
+                  else
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: OutlinedButton.icon(
+                        onPressed: () => matikanAlatDenganKonfirmasi(context, ref),
+                        icon: const Icon(Icons.power_settings_new_rounded,
+                            color: Color(0xFFDC2626), size: 18),
+                        label: const Text(
+                          'Matikan Alat',
+                          style: TextStyle(
+                            color: Color(0xFFDC2626),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          side: const BorderSide(color: Color(0xFFFECACA)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
                       ),
                     ),
                   // BC-Care info banner

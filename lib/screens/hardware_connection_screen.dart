@@ -79,48 +79,7 @@ class _HardwareConnectionScreenState
     await ref.read(deviceStatusProvider.notifier).disconnect();
   }
 
-  Future<void> _shutdownDevice() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Matikan alat?'),
-        content: const Text(
-          'Raspberry Pi akan dimatikan dengan aman. Untuk menyalakannya '
-          'lagi, cabut lalu colok kembali kabel daya alat.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Matikan',
-              style: TextStyle(color: Color(0xFFDC2626)),
-            ),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true || !mounted) return;
-
-    final error =
-        await ref.read(deviceStatusProvider.notifier).shutdownDevice();
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          error ??
-              'Alat sedang dimatikan. Tunggu ±20 detik sebelum mencabut daya.',
-        ),
-        backgroundColor:
-            error == null ? const Color(0xFF0A858C) : const Color(0xFFDC2626),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
+  Future<void> _shutdownDevice() => matikanAlatDenganKonfirmasi(context, ref);
 
   void _rescan() {
     setState(() => _selectedDevice = null);
@@ -859,4 +818,49 @@ class _HardwareConnectionScreenState
       ),
     );
   }
+}
+
+/// Konfirmasi lalu matikan Raspberry Pi (dipakai halaman Koneksi & Perangkat).
+Future<void> matikanAlatDenganKonfirmasi(
+    BuildContext context, WidgetRef ref) async {
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Matikan alat?'),
+      content: const Text(
+        'Raspberry Pi akan dimatikan dengan aman. Untuk menyalakannya '
+        'lagi, cabut lalu colok kembali kabel daya alat.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Batal'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text(
+            'Matikan',
+            style: TextStyle(color: Color(0xFFDC2626)),
+          ),
+        ),
+      ],
+    ),
+  );
+  if (confirm != true || !context.mounted) return;
+
+  final error =
+      await ref.read(deviceStatusProvider.notifier).shutdownDevice();
+  if (!context.mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        error ??
+            'Alat sedang dimatikan. Tunggu ±20 detik sebelum mencabut daya.',
+      ),
+      backgroundColor:
+          error == null ? const Color(0xFF0A858C) : const Color(0xFFDC2626),
+      behavior: SnackBarBehavior.floating,
+    ),
+  );
 }

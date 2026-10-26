@@ -58,6 +58,8 @@ class BCCareComm:
         # Callable -> dict info alat untuk halaman Perangkat di aplikasi
         # (diisi bccare_main; dikirim bersama 'pong' dan 'device_info').
         self.device_info_provider = None
+        # Callable tanpa argumen, dipanggil setelah HP terputus (diisi bccare_main).
+        self.on_client_disconnected = None
 
     # ================================================================
     # SERVER LIFECYCLE
@@ -265,14 +267,20 @@ class BCCareComm:
 
     def _cleanup_client(self):
         with self.lock:
-            if self.client_sock:
-                try:
-                    self.client_sock.close()
-                except Exception:
-                    pass
-                self.client_sock = None
-                self.client_address = None
-                print("[BT] Koneksi klien Android ditutup.")
+            if not self.client_sock:
+                return
+            try:
+                self.client_sock.close()
+            except Exception:
+                pass
+            self.client_sock = None
+            self.client_address = None
+            print("[BT] Koneksi klien Android ditutup.")
+        if self.on_client_disconnected:
+            try:
+                self.on_client_disconnected()
+            except Exception as e:
+                print(f"[BT] Gagal menjalankan handler putus koneksi: {e}")
 
     # ================================================================
     # COMMAND HANDLING
@@ -392,6 +400,11 @@ class BCCareComm:
                     ).start()
                 else:
                     self.send_error("Handler perintah belum tersedia.")
+
+            elif cmd_name == "END_SCAN":
+                # Aplikasi meninggalkan halaman Pemindaian.
+                if self.on_command_callback:
+                    self.on_command_callback("END_SCAN", params)
 
             elif cmd_name == "DISCONNECT":
                 self._cleanup_client()

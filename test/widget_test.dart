@@ -1,7 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:vioscan_flutter/models/clinical_risk_assessment_model.dart';
 import 'package:vioscan_flutter/models/screening_model.dart';
 import 'package:vioscan_flutter/services/device_service.dart';
+import 'package:vioscan_flutter/services/report_service.dart';
 
 void main() {
   group('BC-Care Raspberry Pi & WiFi Data Tests', () {
@@ -118,6 +122,53 @@ void main() {
       // Hasil lama (sebelum ada analisis) tetap terbaca tanpa error.
       final lama = ScreeningModel.fromMap('doc2', {'riskLevel': 'low'});
       expect(lama.analysisData, isNull);
+    });
+
+    test('Laporan PDF berisi foto, assessment, analisis & rekomendasi', () async {
+      await initializeDateFormatting('id_ID');
+      // VIOSCAN_FOTO / VIOSCAN_PDF_OUT: opsional, untuk memeriksa PDF secara visual.
+      final contoh = File(Platform.environment['VIOSCAN_FOTO'] ?? '');
+      final model = ScreeningModel.fromDeviceJson(
+        {
+          'disease': 'BCC',
+          'confidence': 0.876,
+          'mode': 'uv',
+          if (contoh.existsSync())
+            'image_base64': base64Encode(contoh.readAsBytesSync()),
+        },
+        userId: 'u1',
+        lesionLocation: 'Lengan kanan',
+      ).copyWith(
+        clinicalRiskAssessment: const ClinicalRiskAssessmentModel(
+          skinType: 'III-IV',
+          historyOfSunburn: '1-2',
+          familyHistorySkinCancer: 'no',
+          dailyUvExposure: '>3h',
+          sunscreenUse: 'rarely',
+          noticedSkinChanges: 'minor',
+        ),
+      );
+
+      final pdf = await ReportService.buatPdf(
+        model,
+        analisis: [
+          {'label': 'Ketajaman Foto', 'value': 'Tajam'},
+        ],
+        rekomendasi: {
+          'urgency': 'SEGERA – Tindak dalam 1–2 Minggu',
+          'sections': [
+            {
+              'title': 'Tindakan Klinis Segera',
+              'source': 'NCCN BCC Guidelines 2024',
+              'items': ['Rujuk ke SpKK — prioritas urgent'],
+            },
+          ],
+        },
+      );
+      expect(String.fromCharCodes(pdf.take(4)), equals('%PDF'));
+      expect(ReportService.namaFile(model), startsWith('VioScan_'));
+      final out = Platform.environment['VIOSCAN_PDF_OUT'];
+      if (out != null) File(out).writeAsBytesSync(pdf);
     });
 
     test('DeviceService simulation state machine flow', () async {

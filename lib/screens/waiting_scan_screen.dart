@@ -28,10 +28,12 @@ class _WaitingScanScreenState extends ConsumerState<WaitingScanScreen> {
   StreamSubscription<DeviceConnectionState>? _statusSubscription;
   StreamSubscription<bool>? _preparedSubscription;
   bool _navigating = false;
+  late final DeviceService _service;
 
   @override
   void initState() {
     super.initState();
+    _service = ref.read(deviceServiceProvider);
 
     // Listener status perangkat.
     _statusSubscription =
@@ -213,6 +215,9 @@ class _WaitingScanScreenState extends ConsumerState<WaitingScanScreen> {
   void dispose() {
     _statusSubscription?.cancel();
     _preparedSubscription?.cancel();
+    // Keluar dari halaman Pemindaian → LED UV/putih mati & tombol fisik
+    // alat terkunci lagi sampai halaman ini dibuka lewat alur skrining.
+    _service.sendEndScanCommand();
     super.dispose();
   }
 

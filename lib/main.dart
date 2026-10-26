@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -20,6 +22,8 @@ import 'screens/profile_screen.dart';
 import 'screens/about_bcc_screen.dart';
 import 'screens/device_info_screen.dart';
 import 'screens/emergency_assistance_screen.dart';
+import 'providers/device_provider.dart';
+import 'providers/screening_provider.dart';
 
 /// Halaman-halaman yang WAJIB login sebelum bisa diakses.
 /// Jika user belum login dan mencoba navigate ke salah satu halaman ini,
@@ -40,6 +44,10 @@ const _authRequiredScreens = {
   'device',
   'emergency',
 };
+
+/// Koneksi alat & pemindaian hanya lewat alur skrining: Skin Risk Assessment
+/// harus sudah diisi (lihat navigate()).
+const _needsAssessmentScreens = {'hardware', 'waiting_scan'};
 
 /// Layar yang menangani tombol back HP sendiri (PopScope di layar itu):
 /// kuisioner (mundur per pertanyaan), koneksi & tunggu scan (putus Bluetooth),
@@ -117,6 +125,33 @@ class AppNavigator extends StatefulWidget {
 class _AppNavigatorState extends State<AppNavigator> {
   String _currentScreen = 'splash';
   DateTime? _lastBackPress;
+  StreamSubscription<String>? _noticeSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pesan dari alat (mis. tombol fisik ditekan di luar halaman Pemindaian)
+    // tampil di layar mana pun.
+    _noticeSub = ProviderScope.containerOf(context, listen: false)
+        .read(deviceServiceProvider)
+        .noticeStream
+        .listen((msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: const Color(0xFFD97706),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _noticeSub?.cancel();
+    super.dispose();
+  }
 
   /// Tombol back / gesture kembali HP. Tanpa ini Android langsung menutup
   /// aplikasi, karena semua layar berada di satu halaman (AppNavigator).
@@ -185,6 +220,19 @@ class _AppNavigatorState extends State<AppNavigator> {
         }
       });
       return;
+    }
+
+    if (_needsAssessmentScreens.contains(screen) &&
+        ProviderScope.containerOf(context, listen: false)
+                .read(clinicalAssessmentProvider) ==
+            null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('Isi Skin Risk Assessment terlebih dahulu.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      screen = 'assessment';
     }
 
     setState(() => _currentScreen = screen);
