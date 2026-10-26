@@ -55,6 +55,9 @@ class BCCareComm:
         self.lock = threading.Lock()   # serialisasi send_json dari multi-thread
         self.use_native_socket = False
         self.profile_server = None     # SPPProfileServer (BlueZ D-Bus)
+        # Callable -> dict info alat untuk halaman Perangkat di aplikasi
+        # (diisi bccare_main; dikirim bersama 'pong' dan 'device_info').
+        self.device_info_provider = None
 
     # ================================================================
     # SERVER LIFECYCLE
@@ -275,6 +278,16 @@ class BCCareComm:
     # COMMAND HANDLING
     # ================================================================
 
+    def _device_info(self):
+        """Info alat dari bccare_main; kosong jika belum dipasang/gagal dibaca."""
+        if not self.device_info_provider:
+            return {}
+        try:
+            return self.device_info_provider()
+        except Exception as e:
+            print(f"[BT] Gagal membaca info perangkat: {e}")
+            return {}
+
     def _process_incoming_command(self, raw_cmd):
         """Proses perintah JSON dari Android."""
         print(f"[BT] Perintah masuk: {raw_cmd}")
@@ -299,7 +312,11 @@ class BCCareComm:
                     "device": "BC-Care UV-Scan Pro (Raspberry Pi 4)",
                     "status": "ready",
                     "time": time.time(),
+                    "info": self._device_info(),
                 })
+
+            elif cmd_name == "GET_INFO":
+                self.send_json({"type": "device_info", "info": self._device_info()})
 
             elif cmd_name == "PREPARE_SCAN":
                 mode = params.get("mode", "uv")

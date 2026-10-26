@@ -154,17 +154,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         ],
                       ),
                     ),
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withOpacity(0.18),
-                      ),
-                      child: const Icon(Icons.notifications_none_rounded,
-                          color: Colors.white, size: 18),
-                    ),
-                    const SizedBox(width: 10),
                     // Avatar — tappable → profile
                     GestureDetector(
                       onTap: () => widget.navigate('profile'),

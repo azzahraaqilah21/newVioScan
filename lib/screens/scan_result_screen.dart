@@ -1,7 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'dart:math' as math;
 import '../providers/auth_provider.dart';
 import '../providers/screening_provider.dart';
 import '../providers/device_provider.dart';
@@ -30,7 +29,6 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
   bool _isSaved = false;
   bool _isSaving = false;
   late AnimationController _arcController;
-  late Animation<double> _arcAnimation;
 
   final Map<String, Map<String, dynamic>> riskConfig = {
     'low': {
@@ -187,30 +185,6 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     },
   };
 
-  final Map<String, List<Map<String, dynamic>>> analysisItems = {
-    'low': [
-      {'label': 'Batas Lesi', 'value': 'Reguler & tegas', 'ok': true},
-      {'label': 'Keseragaman Warna', 'value': 'Uniform', 'ok': true},
-      {'label': 'Pola Fluorosensi UV', 'value': 'Normal', 'ok': true},
-      {'label': 'Indeks Asimetri', 'value': '0.09 (Rendah)', 'ok': true},
-      {'label': 'Pola Vaskular', 'value': 'Non-arborizing', 'ok': true},
-    ],
-    'moderate': [
-      {'label': 'Batas Lesi', 'value': 'Tidak beraturan lokal', 'ok': false},
-      {'label': 'Keseragaman Warna', 'value': 'Variasi ringan', 'ok': false},
-      {'label': 'Pola Fluorosensi UV', 'value': 'Sedikit abnormal', 'ok': false},
-      {'label': 'Indeks Asimetri', 'value': '0.31 (Sedang)', 'ok': false},
-      {'label': 'Pola Vaskular', 'value': 'Telangiektasia fokal', 'ok': false},
-    ],
-    'high': [
-      {'label': 'Batas Lesi', 'value': 'Ireguler & tidak jelas', 'ok': false},
-      {'label': 'Keseragaman Warna', 'value': 'Heterogen', 'ok': false},
-      {'label': 'Pola Fluorosensi UV', 'value': 'Abnormal signifikan', 'ok': false},
-      {'label': 'Indeks Asimetri', 'value': '0.62 (Tinggi)', 'ok': false},
-      {'label': 'Pola Vaskular', 'value': 'Arborizing vessels', 'ok': false},
-    ],
-  };
-
   @override
   void initState() {
     super.initState();
@@ -218,7 +192,6 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     );
-    _arcAnimation = CurvedAnimation(parent: _arcController, curve: Curves.easeOut);
     _arcController.forward();
 
     // NOTE: ref.listen TIDAK boleh dipanggil di initState — Riverpod hanya
@@ -398,7 +371,6 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
 
     final rc = riskConfig[riskLevel]!;
     final reco = recommendations[riskLevel]!;
-    final analysis = analysisItems[riskLevel]!;
     final confidence = hwResult != null ? hwResult.confidence : (rc['confidence'] as double);
 
     // Tombol back HP = tombol kembali di layar (lihat _tinggalkanHasil).
@@ -795,257 +767,6 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                     ),
                   ),
 
-                  // Data Sensor Ultrasonik HC-SR04 (Elevasi & Ketebalan Lesi)
-                  if (hwResult?.ultrasonicData != null) ...[
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 14),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(22),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.05),
-                            blurRadius: 14,
-                            offset: const Offset(0, 2),
-                          )
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF0A858C).withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: const Icon(Icons.waves_rounded, color: Color(0xFF0A858C), size: 18),
-                              ),
-                              const SizedBox(width: 10),
-                              const Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Pengukuran Sensor Ultrasonik',
-                                      style: TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF1F2937),
-                                      ),
-                                    ),
-                                    Text(
-                                      'Sensor HC-SR04 · Analisis Elevasi Jaringan Kulit',
-                                      style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildMetricTile(
-                                  label: 'Ref Normal',
-                                  value: '${hwResult!.ultrasonicData!['jarak_referensi'] ?? 0} mm',
-                                  color: const Color(0xFF4B5563),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _buildMetricTile(
-                                  label: 'Jarak Lesi',
-                                  value: '${hwResult.ultrasonicData!['jarak_lesi'] ?? 0} mm',
-                                  color: const Color(0xFF4B5563),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _buildMetricTile(
-                                  label: 'Elevasi (Delta)',
-                                  value: '${hwResult.ultrasonicData!['selisih'] ?? 0} mm',
-                                  color: const Color(0xFF0A858C),
-                                  isBold: true,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF3F4F6),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.info_outline_rounded, size: 14, color: Color(0xFF4B5563)),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    'Status: ${hwResult.ultrasonicData!['status'] ?? "Terukur"}',
-                                    style: const TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF374151),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-
-                  // Confidence + Analysis row
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Circular confidence gauge
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.fromLTRB(10, 14, 10, 14),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(22),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
-                                blurRadius: 12,
-                                offset: const Offset(0, 2),
-                              )
-                            ],
-                          ),
-                          child: Column(
-                            children: [
-                              const Text(
-                                'Akurasi CNN',
-                                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                              ),
-                              const SizedBox(height: 8),
-                              SizedBox(
-                                width: 76,
-                                height: 76,
-                                child: AnimatedBuilder(
-                                  animation: _arcAnimation,
-                                  builder: (_, __) {
-                                    return CustomPaint(
-                                      painter: _ArcPainter(
-                                        value: _arcAnimation.value * confidence / 100,
-                                        color: rc['text'] as Color,
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          '$confidence%',
-                                          style: TextStyle(
-                                            color: rc['text'] as Color,
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                confidence >= 90 ? 'Sangat Tinggi' : confidence >= 75 ? 'Tinggi' : 'Cukup',
-                                style: TextStyle(
-                                  color: rc['text'] as Color,
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      // Analysis summary
-                      Expanded(
-                        flex: 2,
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(22),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
-                                blurRadius: 12,
-                                offset: const Offset(0, 2),
-                              )
-                            ],
-                          ),
-                          child: Column(
-                            children: [
-                              const Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  'Analisis BC-Care',
-                                  style: TextStyle(
-                                      color: Color(0xFF94A3B8), fontSize: 11),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              ...analysis.asMap().entries.map((e) {
-                                final i = e.key;
-                                final item = e.value;
-                                return Padding(
-                                  padding: EdgeInsets.only(
-                                    bottom: i < analysis.length - 1 ? 5 : 0,
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        item['label'] as String,
-                                        style: const TextStyle(
-                                            color: Color(0xFF94A3B8), fontSize: 10),
-                                      ),
-                                      Row(
-                                        children: [
-                                          Container(
-                                            width: 5,
-                                            height: 5,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: item['ok'] as bool
-                                                  ? const Color(0xFF22C55E)
-                                                  : rc['text'] as Color,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            item['value'] as String,
-                                            style: const TextStyle(
-                                              color: Color(0xFF374151),
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
                   // Disease Probabilities Distribution
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 300),
@@ -1551,72 +1272,6 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     ),
     );
   }
-
-  Widget _buildMetricTile({
-    required String label,
-    required String value,
-    required Color color,
-    bool isBold = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 10, color: Color(0xFF6B7280))),
-          const SizedBox(height: 3),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: isBold ? FontWeight.w800 : FontWeight.w600,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ArcPainter extends CustomPainter {
-  final double value;
-  final Color color;
-  _ArcPainter({required this.value, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 4;
-    final bgPaint = Paint()
-      ..color = const Color(0xFFF3F4F6)
-      ..strokeWidth = 7
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    final fgPaint = Paint()
-      ..color = color
-      ..strokeWidth = 7
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawCircle(center, radius, bgPaint);
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      -math.pi / 2,
-      value * 2 * math.pi,
-      false,
-      fgPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _ArcPainter oldDelegate) =>
-      oldDelegate.value != value || oldDelegate.color != color;
 }
 
 /// Tile keterangan satu jenis penyakit kulit pada panel edukasi di layar hasil.

@@ -23,6 +23,13 @@ final scanProgressProvider = StreamProvider<ScanProgress>((ref) {
   return ref.watch(deviceServiceProvider).progressStream;
 });
 
+/// Info asli alat dari Raspberry Pi (null = belum terhubung).
+final deviceInfoProvider = StreamProvider<Map<String, dynamic>?>((ref) async* {
+  final service = ref.watch(deviceServiceProvider);
+  yield service.deviceInfo;
+  yield* service.deviceInfoStream;
+});
+
 // ── Koneksi Perangkat Bluetooth ──────────────────────────────────────────────
 
 class DeviceStatusNotifier

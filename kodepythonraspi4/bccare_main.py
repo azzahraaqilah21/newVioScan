@@ -275,6 +275,62 @@ def ambil_gambar_dengan_error_handling():
 # (di Android, jika SDP lookup channel gagal, plugin default ke channel 1).
 comm = BCCareComm(port=1, on_command_callback=on_bluetooth_command)
 
+
+def _baca_file(path):
+    try:
+        with open(path) as f:
+            return f.read().replace("\x00", "").strip()
+    except Exception:
+        return None
+
+
+def _kamera_terdeteksi():
+    """True/False dari 'rpicam-hello --list-cameras'; None jika tidak bisa dicek."""
+    if not kamera_tersedia:
+        return False
+    try:
+        r = subprocess.run(["rpicam-hello", "--list-cameras"],
+                           capture_output=True, text=True, timeout=8)
+        return "Available cameras" in (r.stdout + r.stderr)
+    except Exception:
+        return None
+
+
+def info_perangkat():
+    """Data ASLI alat untuk halaman Perangkat di aplikasi (dikirim saat PING
+    dan GET_INFO). Field yang tidak bisa dibaca bernilai None."""
+    serial = None
+    for line in (_baca_file("/proc/cpuinfo") or "").splitlines():
+        if line.startswith("Serial"):
+            serial = line.split(":", 1)[1].strip()
+    suhu = _baca_file("/sys/class/thermal/thermal_zone0/temp")
+    uptime = _baca_file("/proc/uptime")
+    throttled = None
+    try:
+        r = subprocess.run(["vcgencmd", "get_throttled"],
+                           capture_output=True, text=True, timeout=3)
+        if r.returncode == 0 and "=" in r.stdout:
+            throttled = int(r.stdout.strip().split("=", 1)[1], 16)
+    except Exception:
+        pass
+    return {
+        "serial": serial,
+        "board": _baca_file("/proc/device-tree/model"),
+        "hostname": os.uname().nodename,
+        "cpu_temp_c": round(int(suhu) / 1000, 1) if suhu and suhu.isdigit() else None,
+        "uptime_s": int(float(uptime.split()[0])) if uptime else None,
+        # bit 0 = tegangan kurang SAAT INI, bit 16 = pernah kurang sejak boot
+        "undervoltage_now": bool(throttled & 0x1) if throttled is not None else None,
+        "undervoltage_since_boot": bool(throttled & 0x10000) if throttled is not None else None,
+        "camera_detected": _kamera_terdeteksi(),
+        "model_uv": classifier.model_types.get("uv"),
+        "model_white": classifier.model_types.get("white"),
+        "mode": current_mode,
+    }
+
+
+comm.device_info_provider = info_perangkat
+
 # ================================================================
 # KONTROL LED
 # ================================================================

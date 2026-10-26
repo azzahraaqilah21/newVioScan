@@ -1,29 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/device_provider.dart';
+import '../services/device_service.dart';
 import '../widgets/bottom_nav.dart';
 
-class DeviceInfoScreen extends StatefulWidget {
+class DeviceInfoScreen extends ConsumerStatefulWidget {
   final Function(String) navigate;
   const DeviceInfoScreen({super.key, required this.navigate});
 
   @override
-  State<DeviceInfoScreen> createState() => _DeviceInfoScreenState();
+  ConsumerState<DeviceInfoScreen> createState() => _DeviceInfoScreenState();
 }
 
-class _DeviceInfoScreenState extends State<DeviceInfoScreen>
+class _DeviceInfoScreenState extends ConsumerState<DeviceInfoScreen>
     with SingleTickerProviderStateMixin {
   int? expanded = 0;
   late AnimationController _dotController;
-
-  final List<Map<String, String>> specs = [
-    {'label': 'Model', 'value': 'BC-Care UV-Scan Pro'},
-    {'label': 'Firmware', 'value': 'v3.2.1 (Terbaru)'},
-    {'label': 'Panjang Gelombang UV', 'value': '365 nm ± 5 nm'},
-    {'label': 'Model CNN', 'value': 'BCC-Net v3.2'},
-    {'label': 'Sensitivitas', 'value': '94.8%'},
-    {'label': 'Spesifisitas', 'value': '91.3%'},
-    {'label': 'Resolusi Gambar', 'value': '12 MP UV'},
-    {'label': 'Konektivitas', 'value': 'Bluetooth Classic (Offline)'},
-  ];
 
   final List<Map<String, String>> guides = [
     {
@@ -31,16 +23,16 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
       'content': 'Bersihkan area kulit yang akan diperiksa dari riasan, losion, atau krim. Pastikan ruangan minim cahaya ambien. Pegang perangkat BC-Care tegak lurus 3–5 cm dari permukaan kulit. Minta pasien tetap diam selama proses pengambilan gambar berlangsung.',
     },
     {
-      'title': 'Kalibrasi Perangkat',
-      'content': 'Letakkan perangkat pada pad kalibrasi yang tersedia dalam kit. Tekan dan tahan tombol power selama 3 detik hingga LED berubah warna biru, menandakan mode kalibrasi aktif. Tunggu 30 detik hingga kalibrasi otomatis selesai sebelum memulai skrining.',
+      'title': 'Tombol pada Alat',
+      'content': 'Tekan sekali untuk mengaktifkan alat (LED menyala). Setelah aktif: tekan 1× untuk mengambil foto & menjalankan analisis; tekan 2× cepat untuk berganti mode UV ↔ cahaya putih; tahan 8 detik untuk mematikan alat dengan aman. Alat juga bisa dimatikan dari aplikasi lewat tombol "Matikan Alat" di layar Koneksi Bluetooth.',
     },
     {
       'title': 'Interpretasi Hasil',
-      'content': 'Akurasi CNN ≥80% dianggap andal secara klinis. Risiko Rendah (hijau): jaringan normal, edukasi preventif. Risiko Sedang (kuning): monitoring 4–6 minggu, pertimbangkan rujukan. Risiko Tinggi (merah): rujuk segera ke SpKK dalam 1–2 minggu — buat surat rujukan BPJS ke FKRTL.',
+      'content': 'Risiko Rendah (hijau): edukasi preventif & skrining ulang berkala. Risiko Sedang (kuning): monitoring 4–6 minggu, pertimbangkan rujukan. Risiko Tinggi (merah): rujuk ke SpKK dalam 1–2 minggu. Hasil adalah skrining awal berbasis AI — bukan diagnosis, dan tidak menggantikan pemeriksaan dokter.',
     },
     {
       'title': 'Perawatan Perangkat',
-      'content': 'Bersihkan lensa UV dengan kain microfiber yang tersedia setelah setiap penggunaan. Isi ulang baterai saat di bawah 20%. Simpan dalam kotak pelindung pada suhu ruangan (15–30°C), jauh dari sinar matahari langsung dan kelembapan tinggi. Lakukan pengecekan kalibrasi setiap 30 hari.',
+      'content': 'Gunakan adaptor daya 5V 3A. Matikan alat dengan aman (tahan tombol 8 detik atau "Matikan Alat" di aplikasi) dan tunggu ±20 detik sebelum mencabut adaptor, agar penyimpanan tidak rusak. Bersihkan lensa kamera dengan kain microfiber setelah digunakan. Simpan pada suhu ruangan, jauh dari sinar matahari langsung dan kelembapan tinggi.',
     },
   ];
 
@@ -51,6 +43,10 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
+    // Minta data terbaru dari alat (suhu, daya, kamera) jika sedang terhubung.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(deviceServiceProvider).requestDeviceInfo();
+    });
   }
 
   @override
@@ -59,9 +55,75 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
     super.dispose();
   }
 
+  static String _labelModel(Object? tipe) {
+    switch (tipe) {
+      case 'tflite':
+        return 'TFLite (aktif)';
+      case 'keras':
+        return 'Keras (aktif)';
+      case 'keras-unsure':
+        return 'Keras (simulasi)';
+      case 'sim':
+        return 'Simulasi';
+      default:
+        return '—';
+    }
+  }
+
+  static String _labelUptime(Object? detik) {
+    if (detik is! num) return '—';
+    final menit = detik ~/ 60;
+    final jam = menit ~/ 60;
+    return jam > 0 ? '$jam jam ${menit % 60} menit' : '$menit menit';
+  }
+
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.of(context).padding.top;
+    final status = ref.watch(deviceStatusProvider);
+    final connected = const {
+      DeviceConnectionState.connected,
+      DeviceConnectionState.capturing,
+      DeviceConnectionState.transferring,
+      DeviceConnectionState.done,
+    }.contains(status);
+    // Data hanya dari alat yang sedang terhubung — tanpa angka karangan.
+    final info = connected ? ref.watch(deviceInfoProvider).value : null;
+    final namaBt = ref.read(deviceServiceProvider).connectedDevice?.name;
+
+    final suhu = info?['cpu_temp_c'];
+    final dayaSub = info == null
+        ? '—'
+        : info['undervoltage_now'] == true
+            ? 'Tegangan kurang!'
+            : info['undervoltage_since_boot'] == true
+                ? 'Pernah kurang'
+                : 'Normal';
+    final kamera = info?['camera_detected'];
+    final modelUv = info?['model_uv'];
+    final modelWhite = info?['model_white'];
+    final modelAktif = modelUv == 'tflite' || modelUv == 'keras';
+    final modelSim = const {'sim', 'keras-unsure'}.contains(modelUv) ||
+        const {'sim', 'keras-unsure'}.contains(modelWhite);
+
+    final specs = <Map<String, String>>[
+      {'label': 'Papan', 'value': (info?['board'] as String?) ?? '—'},
+      {'label': 'Nomor Seri', 'value': (info?['serial'] as String?) ?? '—'},
+      {'label': 'Nama Bluetooth', 'value': connected ? (namaBt ?? '—') : '—'},
+      {
+        'label': 'Kamera',
+        'value': kamera == true
+            ? 'Terdeteksi'
+            : kamera == false
+                ? 'Tidak terdeteksi'
+                : '—',
+      },
+      {'label': 'Model AI (UV)', 'value': _labelModel(modelUv)},
+      {'label': 'Model AI (Cahaya Putih)', 'value': _labelModel(modelWhite)},
+      {'label': 'Lama Menyala', 'value': _labelUptime(info?['uptime_s'])},
+      {'label': 'Iluminasi', 'value': 'LED UV 365 nm & LED putih'},
+      {'label': 'Konektivitas', 'value': 'Bluetooth Classic (Offline)'},
+    ];
 
     return Container(
       color: const Color(0xFFF0FAFA),
@@ -140,27 +202,33 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 50, height: 50,
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.2),
-                                          borderRadius: BorderRadius.circular(16),
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 50, height: 50,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(16),
+                                          ),
+                                          child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 24),
                                         ),
-                                        child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 24),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      const Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text('BC-Care',
-                                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15.5)),
-                                          Text('UV-Scan Pro · SN: FLR-2024-0482',
-                                            style: TextStyle(color: Colors.white60, fontSize: 12)),
-                                        ],
-                                      ),
-                                    ],
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Text('BC-Care',
+                                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15.5)),
+                                              Text('SN: ${(info?['serial'] as String?) ?? '—'}',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                   Row(
                                     children: [
@@ -168,31 +236,53 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
                                         animation: _dotController,
                                         builder: (_, __) {
                                           return Opacity(
-                                            opacity: Tween<double>(begin: 0.35, end: 1.0).evaluate(_dotController),
+                                            opacity: connected
+                                                ? Tween<double>(begin: 0.35, end: 1.0).evaluate(_dotController)
+                                                : 1.0,
                                             child: Container(
                                               width: 9, height: 9,
-                                              decoration: const BoxDecoration(
+                                              decoration: BoxDecoration(
                                                 shape: BoxShape.circle,
-                                                color: Color(0xFF77DAD7),
+                                                color: connected ? const Color(0xFF77DAD7) : Colors.white38,
                                               ),
                                             ),
                                           );
                                         },
                                       ),
                                       const SizedBox(width: 6),
-                                      const Text('Aktif',
-                                        style: TextStyle(color: Color(0xFF77DAD7), fontSize: 13, fontWeight: FontWeight.w700)),
+                                      Text(connected ? 'Terhubung' : 'Tidak terhubung',
+                                        style: TextStyle(
+                                          color: connected ? const Color(0xFF77DAD7) : Colors.white70,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700)),
                                     ],
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 18),
-                              // Status indicators
+                              // Status indicators (data asli dari alat)
                               Row(
                                 children: [
                                   for (final item in [
-                                    {'icon': Icons.battery_charging_full_rounded, 'label': 'Battery', 'value': '87%', 'sub': 'Charging'},
-                                    {'icon': Icons.bluetooth_rounded, 'label': 'Koneksi', 'value': 'Bluetooth', 'sub': 'Classic SPP'},
+                                    {
+                                      'icon': info?['undervoltage_now'] == true
+                                          ? Icons.power_off_rounded
+                                          : Icons.power_rounded,
+                                      'value': 'Adaptor',
+                                      'sub': dayaSub,
+                                    },
+                                    {
+                                      'icon': connected
+                                          ? Icons.bluetooth_connected_rounded
+                                          : Icons.bluetooth_disabled_rounded,
+                                      'value': 'Bluetooth',
+                                      'sub': connected ? 'Terhubung' : 'Terputus',
+                                    },
+                                    {
+                                      'icon': Icons.thermostat_rounded,
+                                      'value': suhu is num ? '${suhu.toStringAsFixed(1)}°C' : '—',
+                                      'sub': 'Suhu CPU',
+                                    },
                                   ])
                                     Expanded(
                                       child: Container(
@@ -220,27 +310,37 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
                             ],
                           ),
                         ),
-                        // Calibration row
+                        // Model AI row (menggantikan "Status Kalibrasi" palsu)
                         Container(
                           color: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          child: const Row(
+                          child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Row(
+                              const Row(
                                 children: [
-                                  Icon(Icons.settings_rounded, color: Color(0xFF0A858C), size: 15),
+                                  Icon(Icons.memory_rounded, color: Color(0xFF0A858C), size: 15),
                                   SizedBox(width: 8),
-                                  Text('Status Kalibrasi', style: TextStyle(color: Color(0xFF4B5563), fontSize: 13)),
+                                  Text('Model AI', style: TextStyle(color: Color(0xFF4B5563), fontSize: 13)),
                                 ],
                               ),
-                              Row(
-                                children: [
-                                  Icon(Icons.refresh_rounded, color: Color(0xFF22C55E), size: 12),
-                                  SizedBox(width: 6),
-                                  Text('Terkalibrasi',
-                                    style: TextStyle(color: Color(0xFF059669), fontSize: 12, fontWeight: FontWeight.w700)),
-                                ],
+                              Text(
+                                info == null
+                                    ? '—'
+                                    : modelSim
+                                        ? 'SIMULASI'
+                                        : modelAktif
+                                            ? 'Aktif'
+                                            : _labelModel(modelUv),
+                                style: TextStyle(
+                                  color: modelSim
+                                      ? const Color(0xFFD97706)
+                                      : info == null
+                                          ? const Color(0xFF94A3B8)
+                                          : const Color(0xFF059669),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ],
                           ),
@@ -248,6 +348,21 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
                       ],
                     ),
                   ),
+                  if (!connected)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE5E7EB)),
+                      ),
+                      child: const Text(
+                        'Alat belum terhubung. Hubungkan BC-Care lewat Bluetooth untuk melihat data perangkat (nomor seri, suhu, daya, kamera, dan model AI).',
+                        style: TextStyle(color: Color(0xFF6B7280), fontSize: 12, height: 1.5),
+                      ),
+                    ),
                   // BC-Care info banner
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -280,8 +395,8 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
                                 style: TextStyle(color: Color(0xFF0B757B), fontWeight: FontWeight.w700, fontSize: 13)),
                               SizedBox(height: 4),
                               Text(
-                                'BC-Care menggunakan CNN berbasis deep learning yang dilatih pada 5000+ citra dermoskopi untuk deteksi dini Karsinoma Sel Basal (BCC) via fluorosensi UV 365nm, dengan sensitivitas 94.8% dan spesifisitas 91.3% (uji klinis multisenter, 2024).',
-                                style: TextStyle(color: Color(0xff0b757b72), fontSize: 11.2, height: 1.45),
+                                'BC-Care memotret lesi kulit dengan penerangan LED UV 365 nm atau cahaya putih, lalu model AI (CNN EfficientNetB3) yang berjalan di Raspberry Pi memperkirakan kategori NORMAL atau BCC (Karsinoma Sel Basal). Hasil bersifat skrining awal, bukan diagnosis; akurasi model belum divalidasi secara klinis.',
+                                style: TextStyle(color: Color(0xFF0B757B), fontSize: 11.2, height: 1.45),
                               ),
                             ],
                           ),
@@ -313,7 +428,12 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text(e.value['label']!, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
-                                    Text(e.value['value']!, style: const TextStyle(color: Color(0xFF374151), fontSize: 12, fontWeight: FontWeight.w600)),
+                                    const SizedBox(width: 12),
+                                    Flexible(
+                                      child: Text(e.value['value']!,
+                                        textAlign: TextAlign.right,
+                                        style: const TextStyle(color: Color(0xFF374151), fontSize: 12, fontWeight: FontWeight.w600)),
+                                    ),
                                   ],
                                 ),
                               ),

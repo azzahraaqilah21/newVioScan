@@ -61,6 +61,28 @@ class DeviceService {
       StreamController<ScreeningModel>.broadcast();
   final _progressController = StreamController<ScanProgress>.broadcast();
   final _preparedController = StreamController<bool>.broadcast();
+  final _deviceInfoController =
+      StreamController<Map<String, dynamic>?>.broadcast();
+
+  /// Info asli alat (serial, suhu CPU, daya, kamera, model AI) dari
+  /// 'pong' / 'device_info'. null = belum terhubung.
+  Map<String, dynamic>? _deviceInfo;
+  Map<String, dynamic>? get deviceInfo => _deviceInfo;
+  Stream<Map<String, dynamic>?> get deviceInfoStream =>
+      _deviceInfoController.stream;
+
+  void _setDeviceInfo(Map<String, dynamic>? info) {
+    if (_disposed) return;
+    _deviceInfo = info;
+    _deviceInfoController.add(info);
+  }
+
+  /// Minta info alat terbaru (dipakai halaman Perangkat).
+  Future<void> requestDeviceInfo() async {
+    if (_connection?.isConnected == true) {
+      await sendCommand(jsonEncode({'command': 'GET_INFO'}));
+    }
+  }
 
   Stream<DeviceConnectionState> get statusStream =>
       _statusController.stream;
@@ -426,6 +448,7 @@ class DeviceService {
 
     _connectedDevice = null;
     _receiveTail = <int>[];
+    _setDeviceInfo(null);
 
     _updateStatus(DeviceConnectionState.disconnected);
   }
@@ -741,6 +764,15 @@ class DeviceService {
           debugPrint(
             '[BT-RX] Raspberry Pi siap: ${json['device']}',
           );
+          if (json['info'] is Map) {
+            _setDeviceInfo(Map<String, dynamic>.from(json['info'] as Map));
+          }
+          break;
+
+        case 'device_info':
+          if (json['info'] is Map) {
+            _setDeviceInfo(Map<String, dynamic>.from(json['info'] as Map));
+          }
           break;
 
         case 'error':
@@ -883,5 +915,6 @@ class DeviceService {
     _resultController.close();
     _progressController.close();
     _preparedController.close();
+    _deviceInfoController.close();
   }
 }
