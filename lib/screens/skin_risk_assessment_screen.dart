@@ -178,7 +178,14 @@ class _SkinRiskAssessmentScreenState
     final progress = (step + 1) / questions.length;
     final hasAnswer = answers[step].isNotEmpty;
 
-    return Container(
+    // Tombol back HP = tombol kembali di layar: mundur satu pertanyaan,
+    // atau ke Beranda dari pertanyaan pertama.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) goBack();
+      },
+      child: Container(
       color: const Color(0xFFF0FAFA),
       child: Column(
         children: [
@@ -584,6 +591,7 @@ class _SkinRiskAssessmentScreenState
           ),
         ],
       ),
+    ),
     );
   }
 }

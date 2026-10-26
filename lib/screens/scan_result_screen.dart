@@ -401,7 +401,13 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     final analysis = analysisItems[riskLevel]!;
     final confidence = hwResult != null ? hwResult.confidence : (rc['confidence'] as double);
 
-    return Container(
+    // Tombol back HP = tombol kembali di layar (lihat _tinggalkanHasil).
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _tinggalkanHasil();
+      },
+      child: Container(
       color: const Color(0xFFF0FAFA),
       child: Column(
         children: [
@@ -1542,6 +1548,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
           ),
         ],
       ),
+    ),
     );
   }
 

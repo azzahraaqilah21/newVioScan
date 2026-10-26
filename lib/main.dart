@@ -41,6 +41,31 @@ const _authRequiredScreens = {
   'emergency',
 };
 
+/// Layar yang menangani tombol back HP sendiri (PopScope di layar itu):
+/// kuisioner (mundur per pertanyaan), koneksi & tunggu scan (putus Bluetooth),
+/// hasil (bersihkan hasil yang sudah disimpan).
+const _selfHandledBack = {
+  'assessment',
+  'hardware',
+  'waiting_scan',
+  'result',
+  'history_detail',
+};
+
+/// Tujuan tombol back HP — disamakan dengan tombol kembali di dalam layar.
+/// Layar yang tidak ada di sini & di atas (Beranda, login, splash) memakai
+/// "tekan dua kali untuk keluar".
+const _backTarget = {
+  'lesion_info': 'assessment',
+  'ai_detail': 'dashboard',
+  'processing': 'dashboard',
+  'history': 'dashboard',
+  'profile': 'dashboard',
+  'about_bcc': 'dashboard',
+  'device': 'dashboard',
+  'emergency': 'dashboard',
+};
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -91,6 +116,37 @@ class AppNavigator extends StatefulWidget {
 
 class _AppNavigatorState extends State<AppNavigator> {
   String _currentScreen = 'splash';
+  DateTime? _lastBackPress;
+
+  /// Tombol back / gesture kembali HP. Tanpa ini Android langsung menutup
+  /// aplikasi, karena semua layar berada di satu halaman (AppNavigator).
+  void _onSystemBack() {
+    if (_selfHandledBack.contains(_currentScreen)) return;
+
+    final target = _backTarget[_currentScreen];
+    if (target != null) {
+      navigate(target);
+      return;
+    }
+
+    // Beranda / login / splash: tekan dua kali dalam 2 detik untuk keluar.
+    final now = DateTime.now();
+    if (_lastBackPress != null &&
+        now.difference(_lastBackPress!) < const Duration(seconds: 2)) {
+      SystemNavigator.pop();
+      return;
+    }
+    _lastBackPress = now;
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Tekan sekali lagi untuk keluar'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
 
   /// Navigasi terpusat dengan auth guard.
   /// Jika destination memerlukan login dan user belum login,
@@ -202,14 +258,20 @@ class _AppNavigatorState extends State<AppNavigator> {
           });
         }
 
-        return Scaffold(
-          body: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 280),
-            transitionBuilder: (child, animation) =>
-                FadeTransition(opacity: animation, child: child),
-            child: KeyedSubtree(
-              key: ValueKey(_currentScreen),
-              child: _buildScreen(),
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _onSystemBack();
+          },
+          child: Scaffold(
+            body: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              transitionBuilder: (child, animation) =>
+                  FadeTransition(opacity: animation, child: child),
+              child: KeyedSubtree(
+                key: ValueKey(_currentScreen),
+                child: _buildScreen(),
+              ),
             ),
           ),
         );
