@@ -15,7 +15,7 @@ class ScreeningModel {
   final String prediction; // e.g. 'Basal Cell Carcinoma' | 'Nevus' | 'Normal'
   final String riskLevel; // 'low' | 'moderate' | 'high'
   final Map<String, double> probabilities; // e.g. {'BCC': 0.87, 'NORMAL': 0.13}
-  final double confidence; // 0.0 â€“ 100.0
+  final double confidence; // 0.0 – 100.0
   final String recommendation;
 
   // Media
@@ -227,7 +227,7 @@ class ScreeningModel {
     }
 
     final recommendation = isBcc
-        ? 'Rujuk segera ke dokter Spesialis Kulit & Kelamin (SpKK) dalam 1â€“2 minggu. Hindari paparan sinar UV langsung dan gunakan proteksi broad spectrum.'
+        ? 'Rujuk segera ke dokter Spesialis Kulit & Kelamin (SpKK) dalam 1–2 minggu. Hindari paparan sinar UV langsung dan gunakan proteksi broad spectrum.'
         : 'Lesi jinak (Risiko Rendah). Jadwalkan skrining kontrol rutin dalam 3 bulan. Lakukan swaperiksa kulit metode ABCDE.';
 
     return ScreeningModel(
@@ -276,14 +276,14 @@ class ScreeningModel {
           'Nevus': 5.1
         },
         'recommendation':
-            'Schedule follow-up in 4â€“6 weeks. Use dermoscopy if available. Document serial photos.',
+            'Schedule follow-up in 4–6 weeks. Use dermoscopy if available. Document serial photos.',
       },
       'high': {
         'prediction': 'Basal Cell Carcinoma',
         'confidence': 85.3,
         'probabilities': {'BCC': 85.3, 'Nevus': 9.0, 'SH': 5.7},
         'recommendation':
-            'Urgent referral to dermatologist (SpKK) within 1â€“2 weeks. Use BPJS referral form to FKRTL.',
+            'Urgent referral to dermatologist (SpKK) within 1–2 weeks. Use BPJS referral form to FKRTL.',
       },
     };
 

@@ -46,10 +46,10 @@
 #   • PyBluez mendaftarkan service SPP ke SDP agar flutter_bluetooth_serial di
 #     Android bisa menemukan & konek. Fallback native AF_BLUETOOTH (tanpa
 #     PyBluez) TIDAK mendaftar SDP → pairing manual lalu konek by-address.
-#   • Python 3.13 (Trixie): tidak ada wheel tflite-runtime → jalur TF penuh
-#     dipilih otomatis (marker di bawah). Unduhan besar (~200 MB+) tapi
-#     sekalian membuka fallback pemuatan model .keras (Keras 3) bila .tflite
-#     belum di-deploy.
+#   • Python 3.13 (Trixie): tidak ada wheel tflite-runtime → pakai LiteRT
+#     (ai-edge-litert, ~30 MB) yang memuat .tflite. TensorFlow penuh
+#     (~500 MB+) TIDAK dipasang: disk sistem Pi sempit, dan .keras memang
+#     tidak dipakai untuk inferensi (lihat poin berikut).
 #   • Jangan deploy file model .keras ke Pi — pakai .tflite hasil
 #     export_to_tflite.py (jalankan di PC, lihat requirements-dev.txt).
 # ============================================================================
@@ -66,10 +66,9 @@ Pillow>=9.0
 # Jalur A — Bullseye (Python < 3.11): TFLite Runtime (ringan ~5 MB).
 tflite-runtime>=2.10 ; python_version < "3.11"
 
-# Jalur B — Python >= 3.11: TensorFlow penuh. TANPA batas atas: wheel cp313
-# baru mulai dari TF 2.20, jadi pin "<2.18" akan gagal build dari sumber.
-# TF >= 2.16 menerbitkan wheel linux_aarch64 resmi di PyPI.
-tensorflow>=2.16 ; python_version >= "3.11"
+# Jalur B — Python >= 3.11: LiteRT (penerus tflite-runtime). Memakai numpy
+# sistem (apt) — tidak menimpanya. Terverifikasi di Pi: ai-edge-litert 2.3.0.
+ai-edge-litert>=2.1 ; python_version >= "3.11"
 
 # ── GPIO & PyBluez TIDAK di sini ─────────────────────────────────────────────
 # Sengaja tidak masuk requirements: jika build-nya gagal (mis. RPi.GPIO di

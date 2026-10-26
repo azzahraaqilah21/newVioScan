@@ -107,11 +107,12 @@ if ! $PY -c "import bluetooth" 2>/dev/null; then
     warn "PyBluez tidak ada — pakai fallback native (Android konek by-address setelah pairing)"
 fi
 
-# ML: salah satu dari tflite_runtime ATAU tensorflow cukup
-if $PY -c "import tflite_runtime" 2>/dev/null || $PY -c "import tensorflow" 2>/dev/null; then
-    ok "tflite_runtime ATAU tensorflow"
+# ML: salah satu dari tflite_runtime, ai_edge_litert (LiteRT), ATAU tensorflow cukup
+if $PY -c "import tflite_runtime" 2>/dev/null || $PY -c "import ai_edge_litert" 2>/dev/null \
+        || $PY -c "import tensorflow" 2>/dev/null; then
+    ok "tflite_runtime / ai_edge_litert / tensorflow"
 else
-    fail "tflite_runtime / tensorflow (tidak ada keduanya)"
+    fail "tflite_runtime / ai_edge_litert / tensorflow (tidak ada satu pun)"
     MISSING=1
 fi
 

@@ -28,7 +28,7 @@ const _authRequiredScreens = {
   'dashboard',
   'assessment',
   'lesion_info',
-  'hardware',       // koneksi perangkat via WiFi — wajib login
+  'hardware',       // koneksi perangkat via Bluetooth — wajib login
   'waiting_scan',   // pemindaian — wajib login
   'processing',     // animasi pemrosesan — wajib login
   'result',         // hasil skrining — wajib login

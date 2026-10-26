@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/storage_service.dart';
 import '../models/user_model.dart';
 
 /// Singleton AuthService provider
@@ -10,6 +11,10 @@ final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 /// Singleton FirestoreService provider
 final firestoreServiceProvider =
     Provider<FirestoreService>((ref) => FirestoreService());
+
+/// Singleton StorageService provider (foto lesi ke Firebase Storage)
+final storageServiceProvider =
+    Provider<StorageService>((ref) => StorageService());
 
 /// Stream provider for Firebase auth state changes (raw Firebase User)
 final authStateProvider = StreamProvider<User?>((ref) {

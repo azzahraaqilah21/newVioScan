@@ -85,9 +85,15 @@ void main() {
 
       expect(service.currentState, equals(DeviceConnectionState.disconnected));
 
+      final states = <DeviceConnectionState>[];
+      final statusSub = service.statusStream.listen(states.add);
+
       final nextDevicesFuture = service.scanResults.first;
       await service.startScan();
-      expect(service.currentState, equals(DeviceConnectionState.scanning));
+      // 'scanning' hanya sementara: setelah pencarian selesai status kembali
+      // ke disconnected (siap dihubungkan).
+      expect(states, contains(DeviceConnectionState.scanning));
+      expect(service.currentState, equals(DeviceConnectionState.disconnected));
 
       final devices = await nextDevicesFuture;
       expect(devices.isNotEmpty, isTrue);
@@ -98,6 +104,7 @@ void main() {
       await service.disconnect();
       expect(service.currentState, equals(DeviceConnectionState.disconnected));
 
+      await statusSub.cancel();
       service.dispose();
     });
   });

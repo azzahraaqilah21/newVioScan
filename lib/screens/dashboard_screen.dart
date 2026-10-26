@@ -46,7 +46,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     },
     {
       'id': 'device',
-      'icon': Icons.wifi_rounded,
+      'icon': Icons.bluetooth_rounded,
       'label': 'VioTech',
       'desc': 'Info perangkat',
       'color': const Color(0xFF36B8B7),
@@ -275,8 +275,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                               ),
                               child: Icon(
                                 isConnected
-                                    ? Icons.wifi_rounded
-                                    : Icons.wifi_off_rounded,
+                                    ? Icons.bluetooth_connected_rounded
+                                    : Icons.bluetooth_disabled_rounded,
                                 color: Colors.white,
                                 size: 20,
                               ),
@@ -294,7 +294,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                                     ),
                                   ),
                                   Text(
-                                    isConnected ? deviceName : 'Ketuk untuk hubungkan via Wi-Fi',
+                                    isConnected ? deviceName : 'Ketuk untuk hubungkan via Bluetooth',
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.w600,

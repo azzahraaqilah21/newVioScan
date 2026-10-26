@@ -76,7 +76,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
 
   final Map<String, Map<String, dynamic>> recommendations = {
     'high': {
-      'urgency': 'SEGERA â€” Tindak dalam 1â€“2 Minggu',
+      'urgency': 'SEGERA — Tindak dalam 1–2 Minggu',
       'urgencyColor': const Color(0xFFDC2626),
       'urgencyBg': const Color(0xFFFEF2F2),
       'sections': [
@@ -87,7 +87,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
           'title': 'Tindakan Klinis Segera',
           'source': 'NCCN BCC Guidelines 2024, Kemenkes RI 2022',
           'items': [
-            'Buat surat rujukan ke dokter Spesialis Kulit & Kelamin (SpKK) â€” prioritas urgent dalam 1â€“2 minggu',
+            'Buat surat rujukan ke dokter Spesialis Kulit & Kelamin (SpKK) — prioritas urgent dalam 1–2 minggu',
             'Gunakan form rujukan BPJS ke FKRTL (Fasilitas Kesehatan Rujukan Tingkat Lanjut)',
             'Jangan lakukan biopsi atau tindakan eksisi di level puskesmas',
             'Dokumentasikan lesi: foto dengan penggaris skala cm dari jarak 15 cm dan 30 cm',
@@ -101,7 +101,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
           'title': 'Edukasi Pasien',
           'source': 'WHO Cancer Prevention Guidelines 2023',
           'items': [
-            'Hindari paparan sinar UV langsung, terutama pukul 10.00â€“16.00 WIB',
+            'Hindari paparan sinar UV langsung, terutama pukul 10.00–16.00 WIB',
             'Gunakan tabir surya SPF 50+ broad spectrum setiap hari',
             'Jangan manipulasi, menggaruk, atau mengobati lesi secara mandiri',
             'Segera kembali ke puskesmas jika terdapat perdarahan, ulserasi, atau perubahan cepat',
@@ -110,7 +110,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
       ],
     },
     'moderate': {
-      'urgency': 'MONITORING â€” Tindak dalam 4â€“6 Minggu',
+      'urgency': 'MONITORING — Tindak dalam 4–6 Minggu',
       'urgencyColor': const Color(0xFFD97706),
       'urgencyBg': const Color(0xFFFFFBEB),
       'sections': [
@@ -121,9 +121,9 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
           'title': 'Monitoring & Follow-up',
           'source': 'EDF Guidelines 2023, Permenkes No. 5/2014',
           'items': [
-            'Jadwalkan pemeriksaan ulang dalam 4â€“6 minggu untuk evaluasi perubahan lesi',
+            'Jadwalkan pemeriksaan ulang dalam 4–6 minggu untuk evaluasi perubahan lesi',
             'Gunakan dermoskopi jika tersedia untuk evaluasi struktur vaskular dan pigmen',
-            'Catat foto serial lesi dengan skala â€” bandingkan setiap kunjungan',
+            'Catat foto serial lesi dengan skala — bandingkan setiap kunjungan',
             'Nilai ABCDE: Asymmetry, Border, Color, Diameter, Evolving pada setiap kontrol',
           ],
         },
@@ -136,14 +136,14 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
           'items': [
             'Oleskan tabir surya SPF 30+ minimal 30 menit sebelum terpapar matahari',
             'Gunakan pakaian lengan panjang dan topi bertepi lebar di luar ruangan',
-            'Hindari trauma pada area lesi â€” jangan dikorek atau ditekan',
+            'Hindari trauma pada area lesi — jangan dikorek atau ditekan',
             'Ajarkan ABCDE self-check kulit secara mandiri setiap bulan',
           ],
         },
       ],
     },
     'low': {
-      'urgency': 'PREVENTIF â€” Skrining Ulang dalam 3 Bulan',
+      'urgency': 'PREVENTIF — Skrining Ulang dalam 3 Bulan',
       'urgencyColor': const Color(0xFF059669),
       'urgencyBg': const Color(0xFFECFDF5),
       'sections': [
@@ -167,11 +167,11 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
           'title': 'Panduan ABCDE untuk Pasien',
           'source': 'American Academy of Dermatology (AAD) ABCDE Rule',
           'items': [
-            'A â€“ Asymmetry: bentuk lesi tidak simetris bila dilipat dua',
-            'B â€“ Border: tepi lesi tidak rata, bergerigi, atau tidak jelas batasnya',
-            'C â€“ Color: variasi warna dalam satu lesi (coklat, hitam, merah, putih)',
-            'D â€“ Diameter: ukuran >6 mm (sebesar penghapus ujung pensil)',
-            'E â€“ Evolving: perubahan ukuran, warna, bentuk, atau gejala baru',
+            'A – Asymmetry: bentuk lesi tidak simetris bila dilipat dua',
+            'B – Border: tepi lesi tidak rata, bergerigi, atau tidak jelas batasnya',
+            'C – Color: variasi warna dalam satu lesi (coklat, hitam, merah, putih)',
+            'D – Diameter: ukuran >6 mm (sebesar penghapus ujung pensil)',
+            'E – Evolving: perubahan ukuran, warna, bentuk, atau gejala baru',
           ],
         },
       ],
@@ -212,7 +212,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     _arcAnimation = CurvedAnimation(parent: _arcController, curve: Curves.easeOut);
     _arcController.forward();
 
-    // NOTE: ref.listen TIDAK boleh dipanggil di initState â€” Riverpod hanya
+    // NOTE: ref.listen TIDAK boleh dipanggil di initState — Riverpod hanya
     // mengizinkannya di dalam build() (assertion
     // "ref.listen can only be used within the build method of a ConsumerWidget").
     // Listener sudah dipindah ke build() di bawah.
@@ -268,8 +268,8 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
         return;
       }
 
-      final model = hwResult
-          // FIX: userId & info lesi dari form/auth WAJIB dipakai â€” sebelumnya
+      var model = hwResult
+          // FIX: userId & info lesi dari form/auth WAJIB dipakai — sebelumnya
           // hasil hardware disimpan dengan userId 'local_patient' & lokasi
           // generik, sehingga riwayat/statistik user tidak pernah terisi.
           .copyWith(
@@ -280,7 +280,24 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
           );
 
       // Simpan ke Firestore jika akun online terhubung
+      var fotoTerunggah = true;
       if (user != null) {
+        // Unggah foto lesi agar ikut tampil di riwayat. Gagal unggah tidak
+        // membatalkan penyimpanan hasil.
+        final fotoBytes = model.rawImageBytes;
+        if (fotoBytes != null && model.fluorescenceImageUrl == null) {
+          try {
+            final url = await ref
+                .read(storageServiceProvider)
+                .uploadFluorescenceImage(user.uid, fotoBytes)
+                .timeout(const Duration(seconds: 30));
+            model = model.copyWith(fluorescenceImageUrl: url);
+          } catch (e) {
+            fotoTerunggah = false;
+            debugPrint('Upload foto gagal: $e');
+          }
+        }
+
         try {
           final firestoreService = ref.read(firestoreServiceProvider);
           await firestoreService.saveScreening(model);
@@ -308,9 +325,11 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    user != null
-                        ? 'Hasil berhasil disimpan ke database & cloud!'
-                        : 'Hasil berhasil disimpan secara lokal (Mode Offline)!',
+                    user == null
+                        ? 'Hasil berhasil disimpan secara lokal (Mode Offline)!'
+                        : fotoTerunggah
+                            ? 'Hasil berhasil disimpan ke database & cloud!'
+                            : 'Hasil tersimpan, tetapi foto lesi gagal diunggah.',
                   ),
                 ),
               ],
@@ -342,7 +361,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
       if (next != null && mounted) {
         setState(() {
           riskLevel = next.riskLevel;
-          _isSaved = false; // hasil baru â†’ tombol simpan aktif lagi
+          _isSaved = false; // hasil baru → tombol simpan aktif lagi
         });
         _arcController.forward(from: 0);
       }
@@ -416,7 +435,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                               final hw = ref.watch(latestHardwareResultProvider);
                               final date = hw?.screeningDate ?? DateTime.now();
                               final formatted = DateFormat(
-                                'd MMM yyyy Â· HH:mm',
+                                'd MMM yyyy · HH:mm',
                                 'id_ID',
                               ).format(date);
                               return Text(
@@ -477,7 +496,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                               Icon(
                                 hwResult.isSimulated
                                     ? Icons.warning_amber_rounded
-                                    : Icons.wifi_rounded,
+                                    : Icons.bluetooth_rounded,
                                 size: 16,
                                 color: hwResult.isSimulated
                                     ? const Color(0xFFD97706)
@@ -487,8 +506,8 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                               Flexible(
                                 child: Text(
                                   hwResult.isSimulated
-                                      ? 'HASIL SIMULASI â€” model ML tidak aktif. BUKAN diagnosis. Jalankan export_to_tflite.py & deploy .tflite ke alat.'
-                                      : 'Hasil Real-time Raspberry Pi via WiFi (${hwResult.mode?.toUpperCase() ?? "UV"})',
+                                      ? 'HASIL SIMULASI — model ML tidak aktif. BUKAN diagnosis. Jalankan export_to_tflite.py & deploy .tflite ke alat.'
+                                      : 'Hasil Real-time Raspberry Pi via Bluetooth (${hwResult.mode?.toUpperCase() ?? "UV"})',
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
@@ -519,7 +538,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'SKENARIO DEMO â€” Pilih tingkat risiko:',
+                      'SKENARIO DEMO — Pilih tingkat risiko:',
                       style: TextStyle(
                         color: Color(0xFF94A3B8),
                         fontSize: 10.5,
@@ -632,7 +651,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                             const Icon(Icons.camera_alt_rounded, color: Color(0xFF77DAD7), size: 12),
                                             const SizedBox(width: 4),
                                             Text(
-                                              'Kamera Raspberry Pi Â· ${hwResult?.mode?.toUpperCase() ?? "UV"}',
+                                              'Kamera Raspberry Pi · ${hwResult?.mode?.toUpperCase() ?? "UV"}',
                                               style: const TextStyle(
                                                 color: Color(0xFF77DAD7),
                                                 fontSize: 11,
@@ -660,7 +679,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                           color: Colors.black.withValues(alpha: 0.4),
                                           borderRadius: BorderRadius.circular(8),
                                         ),
-                                        child: const Text('Fluorosensi UV Â· BC-Care',
+                                        child: const Text('Fluorosensi UV · BC-Care',
                                           style: TextStyle(color: Color(0xFF77DAD7), fontSize: 11, fontWeight: FontWeight.w600)),
                                       ),
                                     ),
@@ -701,7 +720,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                       ),
                                     ),
                                     Text(
-                                      '${rc['labelEn']} Â· Lokasi: Lengan Kiri',
+                                      '${rc['labelEn']} · Lokasi: Lengan Kiri',
                                       style: TextStyle(
                                         color: (rc['text'] as Color).withOpacity(0.75),
                                         fontSize: 11,
@@ -780,7 +799,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                       ),
                                     ),
                                     Text(
-                                      'Sensor HC-SR04 Â· Analisis Elevasi Jaringan Kulit',
+                                      'Sensor HC-SR04 · Analisis Elevasi Jaringan Kulit',
                                       style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
                                     ),
                                   ],
@@ -1253,7 +1272,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                       }).toList(),
                     ),
                   ),
-                  // â”€â”€ Panel Informasi 3 Jenis Penyakit Kulit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                  // ── Panel Informasi 3 Jenis Penyakit Kulit ──────────────
                   Container(
                     margin: const EdgeInsets.only(bottom: 14),
                     decoration: BoxDecoration(
@@ -1296,7 +1315,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                                     ),
                                   ),
                                   Text(
-                                    'Informasi Klinis Â· PERDOSKI & NCCN 2024',
+                                    'Informasi Klinis · PERDOSKI & NCCN 2024',
                                     style: TextStyle(
                                       color: Color(0xFF94A3B8),
                                       fontSize: 10,
@@ -1344,13 +1363,13 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                           description:
                               'Pembesaran kelenjar minyak yang jinak. Umum pada kulit berminyak dan orang dewasa >40 tahun. Tampak seperti papul kekuningan kecil dengan cekungan di tengah. Sering mirip BCC (doughnut sign).',
                           treatment:
-                              'Jinak namun dapat menyerupai BCC. Konfirmasi dengan dermoskopi. Terapi estetika: electrodesiccation, laser COâ‚‚, atau retinoid topikal.',
+                              'Jinak namun dapat menyerupai BCC. Konfirmasi dengan dermoskopi. Terapi estetika: electrodesiccation, laser CO₂, atau retinoid topikal.',
                           isLast: true,
                         ),
                       ],
                     ),
                   ),
-                  // â”€â”€ Disclaimer Medis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                  // ── Disclaimer Medis ─────────────────────────────────────
                   Container(
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                     margin: const EdgeInsets.only(bottom: 14),
@@ -1389,7 +1408,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                         ),
                         const SizedBox(height: 6),
                         const Text(
-                          'ðŸ“š Berbasis: NCCN BCC Guidelines 2024 Â· Kemenkes RI 2022 Â· PERDOSKI CPG 2021 Â· EDF Guidelines 2023',
+                          '📚 Berbasis: NCCN BCC Guidelines 2024 · Kemenkes RI 2022 · PERDOSKI CPG 2021 · EDF Guidelines 2023',
                           style: TextStyle(
                             color: Color(0xFF78350F),
                             fontSize: 10,

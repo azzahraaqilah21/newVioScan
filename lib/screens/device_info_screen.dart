@@ -22,7 +22,7 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
     {'label': 'Sensitivitas', 'value': '94.8%'},
     {'label': 'Spesifisitas', 'value': '91.3%'},
     {'label': 'Resolusi Gambar', 'value': '12 MP UV'},
-    {'label': 'Konektivitas', 'value': 'WiFi Hotspot (Offline)'},
+    {'label': 'Konektivitas', 'value': 'Bluetooth Classic (Offline)'},
   ];
 
   final List<Map<String, String>> guides = [
@@ -192,7 +192,7 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
                                 children: [
                                   for (final item in [
                                     {'icon': Icons.battery_charging_full_rounded, 'label': 'Battery', 'value': '87%', 'sub': 'Charging'},
-                                    {'icon': Icons.wifi_rounded, 'label': 'Signal', 'value': 'Strong', 'sub': 'IEEE 802.11n 2.4GHz'},
+                                    {'icon': Icons.bluetooth_rounded, 'label': 'Koneksi', 'value': 'Bluetooth', 'sub': 'Classic SPP'},
                                     {'icon': Icons.radar_rounded, 'label': 'UV Sensor', 'value': 'Ready', 'sub': '365nm'},
                                   ])
                                     Expanded(

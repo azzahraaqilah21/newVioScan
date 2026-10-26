@@ -1,29 +1,41 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import '../models/screening_model.dart';
+import '../providers/screening_provider.dart';
 import '../widgets/bottom_nav.dart';
 
-class ScanHistoryScreen extends StatefulWidget {
+class ScanHistoryScreen extends ConsumerStatefulWidget {
   final Function(String) navigate;
   const ScanHistoryScreen({super.key, required this.navigate});
 
   @override
-  State<ScanHistoryScreen> createState() => _ScanHistoryScreenState();
+  ConsumerState<ScanHistoryScreen> createState() => _ScanHistoryScreenState();
 }
 
-class _ScanHistoryScreenState extends State<ScanHistoryScreen>
+class _ScanHistoryScreenState extends ConsumerState<ScanHistoryScreen>
     with SingleTickerProviderStateMixin {
   String filter = 'all';
   String search = '';
 
-  final List<Map<String, dynamic>> scans = [
-    {'id': 1, 'date': '31 Mei 2026', 'time': '09:15 WIB', 'location': 'Lengan Kiri', 'risk': 'low', 'confidence': 92.4},
-    {'id': 2, 'date': '28 Mei 2026', 'time': '10:32 WIB', 'location': 'Bahu Kanan', 'risk': 'moderate', 'confidence': 78.1},
-    {'id': 3, 'date': '20 Mei 2026', 'time': '14:45 WIB', 'location': 'Punggung Atas', 'risk': 'low', 'confidence': 88.9},
-    {'id': 4, 'date': '12 Mei 2026', 'time': '11:00 WIB', 'location': 'Pipi Kiri', 'risk': 'high', 'confidence': 85.3},
-    {'id': 5, 'date': '05 Mei 2026', 'time': '15:30 WIB', 'location': 'Lengan Kanan', 'risk': 'low', 'confidence': 94.1},
-    {'id': 6, 'date': '28 Apr 2026', 'time': '09:00 WIB', 'location': 'Tangan Kiri', 'risk': 'moderate', 'confidence': 71.6},
-    {'id': 7, 'date': '15 Apr 2026', 'time': '16:15 WIB', 'location': 'Batang Hidung', 'risk': 'low', 'confidence': 96.2},
-    {'id': 8, 'date': '02 Apr 2026', 'time': '13:00 WIB', 'location': 'Telinga Kiri', 'risk': 'low', 'confidence': 90.8},
-  ];
+  static final _dateFmt = DateFormat('dd MMM yyyy', 'id_ID');
+  static final _timeFmt = DateFormat('HH:mm', 'id_ID');
+
+  // Diisi di build() dari Firestore (users/{uid}/screenings).
+  List<Map<String, dynamic>> scans = [];
+
+  Map<String, dynamic> _toCardData(ScreeningModel s) {
+    return {
+      'model': s,
+      'date': _dateFmt.format(s.screeningDate),
+      'time': '${_timeFmt.format(s.screeningDate)} WIB',
+      'location': s.lesionLocation,
+      'risk': riskConfig.containsKey(s.riskLevel) ? s.riskLevel : 'moderate',
+      'confidence': double.parse(s.confidence.toStringAsFixed(1)),
+      'simulated': s.isSimulated,
+    };
+  }
 
   final Map<String, Map<String, dynamic>> riskConfig = {
     'low': {'label': 'Rendah', 'bg': const Color(0xFFECFDF5), 'text': const Color(0xFF059669), 'border': const Color(0xFFA7F3D0), 'emoji': '✓'},
@@ -49,9 +61,107 @@ class _ScanHistoryScreenState extends State<ScanHistoryScreen>
     return c;
   }
 
+  void _showDetail(ScreeningModel s, Map<String, dynamic> rc) {
+    final imageUrl = s.fluorescenceImageUrl ?? s.imageUrl;
+    final when =
+        '${_dateFmt.format(s.screeningDate)} · ${_timeFmt.format(s.screeningDate)} WIB';
+
+    Widget row(String label, String value) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 90,
+                child: Text(label,
+                    style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12.5)),
+              ),
+              Expanded(
+                child: Text(value,
+                    style: const TextStyle(
+                        color: Color(0xFF1F2937),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(s.prediction,
+                  style: TextStyle(
+                      color: rc['text'] as Color,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text('${s.lesionLocation} · $when',
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+              if (s.isSimulated) ...[
+                const SizedBox(height: 10),
+                const Text('HASIL SIMULASI — bukan diagnosis.',
+                    style: TextStyle(
+                        color: Color(0xFFB45309),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700)),
+              ],
+              if (imageUrl != null) ...[
+                const SizedBox(height: 14),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: CachedNetworkImage(
+                    imageUrl: imageUrl,
+                    height: 200,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => const SizedBox(
+                      height: 60,
+                      child: Center(child: Text('Foto tidak dapat dimuat')),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              row('Risiko', rc['label'] as String),
+              row('Keyakinan', '${s.confidence.toStringAsFixed(1)}%'),
+              row('Mode', (s.mode ?? 'uv').toUpperCase()),
+              if (s.lesionNotes != null && s.lesionNotes!.isNotEmpty)
+                row('Catatan', s.lesionNotes!),
+              const SizedBox(height: 10),
+              const Text('Rekomendasi',
+                  style: TextStyle(
+                      color: Color(0xFF1F2937),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(s.recommendation,
+                  style: const TextStyle(
+                      color: Color(0xFF4B5563), fontSize: 12.5, height: 1.5)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.of(context).padding.top;
+    final screeningsAsync = ref.watch(screeningsStreamProvider);
+    scans = (screeningsAsync.value ?? const <ScreeningModel>[])
+        .map(_toCardData)
+        .toList();
     final filteredList = filtered;
 
     return Container(
@@ -170,7 +280,22 @@ class _ScanHistoryScreenState extends State<ScanHistoryScreen>
           ),
           // List
           Expanded(
-            child: filteredList.isEmpty
+            child: screeningsAsync.isLoading && !screeningsAsync.hasValue
+                ? const Center(
+                    child: CircularProgressIndicator(color: Color(0xFF0A858C)),
+                  )
+                : screeningsAsync.hasError && !screeningsAsync.hasValue
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Gagal memuat riwayat: ${screeningsAsync.error}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13),
+                      ),
+                    ),
+                  )
+                : filteredList.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -181,8 +306,11 @@ class _ScanHistoryScreenState extends State<ScanHistoryScreen>
                           child: const Icon(Icons.search_rounded, color: Color(0xFF9CA3AF), size: 24),
                         ),
                         const SizedBox(height: 14),
-                        const Text('Tidak ada skrining ditemukan',
-                          style: TextStyle(color: Color(0xFF6B7280), fontSize: 14)),
+                        Text(
+                          scans.isEmpty
+                              ? 'Belum ada hasil skrining tersimpan'
+                              : 'Tidak ada skrining ditemukan',
+                          style: const TextStyle(color: Color(0xFF6B7280), fontSize: 14)),
                       ],
                     ),
                   )
@@ -193,9 +321,13 @@ class _ScanHistoryScreenState extends State<ScanHistoryScreen>
                       final scan = filteredList[i];
                       final rc = riskConfig[scan['risk']]!;
                       return _ScanCard(
+                        // Key per dokumen: saat stream Firestore berubah,
+                        // animasi kartu tidak memakai data kartu lain.
+                        key: ValueKey((scan['model'] as ScreeningModel).id),
                         scan: scan,
                         rc: rc,
-                        onTap: () => widget.navigate('result'),
+                        onTap: () =>
+                            _showDetail(scan['model'] as ScreeningModel, rc),
                         index: i,
                       );
                     },
@@ -214,7 +346,7 @@ class _ScanCard extends StatefulWidget {
   final VoidCallback onTap;
   final int index;
 
-  const _ScanCard({required this.scan, required this.rc, required this.onTap, required this.index});
+  const _ScanCard({super.key, required this.scan, required this.rc, required this.onTap, required this.index});
 
   @override
   State<_ScanCard> createState() => _ScanCardState();
@@ -294,12 +426,15 @@ class _ScanCardState extends State<_ScanCard> with SingleTickerProviderStateMixi
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        scan['location'] as String,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13.5,
-                          color: Color(0xFF1F2937),
+                      Flexible(
+                        child: Text(
+                          scan['location'] as String,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13.5,
+                            color: Color(0xFF1F2937),
+                          ),
                         ),
                       ),
                       Container(
@@ -325,6 +460,18 @@ class _ScanCardState extends State<_ScanCard> with SingleTickerProviderStateMixi
                     '${scan['date']} · ${scan['time']}',
                     style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
                   ),
+                  if (scan['simulated'] == true)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2),
+                      child: Text(
+                        'Hasil simulasi — bukan diagnosis',
+                        style: TextStyle(
+                          color: Color(0xFFD97706),
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
