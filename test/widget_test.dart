@@ -79,6 +79,22 @@ void main() {
       expect(model.ultrasonicData!['status'], equals('SETARA REFERENSI'));
     });
 
+    test('Foto lesi ikut tersimpan & terbaca lewat map Firestore', () {
+      // JPEG palsu kecil (isi byte bebas; yang diuji round-trip base64).
+      final foto = base64Decode(base64Encode(List<int>.generate(2048, (i) => i % 256)));
+      final model = ScreeningModel.fromDeviceJson(
+        {'disease': 'BCC', 'confidence': 0.9, 'image_base64': base64Encode(foto)},
+        userId: 'u1',
+      );
+
+      final map = model.toMap();
+      expect(map['imageBase64'], isA<String>());
+
+      final dibaca = ScreeningModel.fromMap('doc1', map);
+      expect(dibaca.rawImageBytes, equals(foto));
+      expect(dibaca.isSimulated, isFalse);
+    });
+
     test('DeviceService simulation state machine flow', () async {
       final service = DeviceService();
       service.setSimulationMode(true);

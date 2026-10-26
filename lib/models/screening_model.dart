@@ -57,6 +57,10 @@ class ScreeningModel {
     this.isSimulated = false,
   });
 
+  /// Batas ukuran foto yang ikut disimpan di dokumen Firestore (maks dokumen
+  /// 1 MB; base64 menambah ~33%). Foto dari Pi (lebar 600 px) jauh di bawah ini.
+  static const maxStoredImageBytes = 600 * 1024;
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -77,6 +81,11 @@ class ScreeningModel {
       'createdAt': Timestamp.fromDate(createdAt),
       'userId': userId,
       'isSimulated': isSimulated,
+      // Foto lesi (JPEG) disimpan sebagai base64 di dokumen yang sama.
+      'imageBase64': rawImageBytes != null &&
+              rawImageBytes!.length <= maxStoredImageBytes
+          ? base64Encode(rawImageBytes!)
+          : null,
     };
   }
 
@@ -136,6 +145,16 @@ class ScreeningModel {
       });
     }
 
+    Uint8List? imageBytes;
+    final imageB64 = map['imageBase64'];
+    if (imageB64 is String && imageB64.isNotEmpty) {
+      try {
+        imageBytes = base64Decode(imageB64);
+      } catch (_) {
+        imageBytes = null; // data foto rusak → tampil tanpa foto
+      }
+    }
+
     return ScreeningModel(
       id: docId,
       screeningDate:
@@ -154,6 +173,7 @@ class ScreeningModel {
       recommendation: map['recommendation'] as String? ?? '',
       imageUrl: map['imageUrl'] as String?,
       fluorescenceImageUrl: map['fluorescenceImageUrl'] as String?,
+      rawImageBytes: imageBytes,
       ultrasonicData: map['ultrasonicData'] != null
           ? Map<String, dynamic>.from(map['ultrasonicData'] as Map)
           : null,

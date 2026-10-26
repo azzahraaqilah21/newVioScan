@@ -193,7 +193,6 @@ class _DeviceInfoScreenState extends State<DeviceInfoScreen>
                                   for (final item in [
                                     {'icon': Icons.battery_charging_full_rounded, 'label': 'Battery', 'value': '87%', 'sub': 'Charging'},
                                     {'icon': Icons.bluetooth_rounded, 'label': 'Koneksi', 'value': 'Bluetooth', 'sub': 'Classic SPP'},
-                                    {'icon': Icons.radar_rounded, 'label': 'UV Sensor', 'value': 'Ready', 'sub': '365nm'},
                                   ])
                                     Expanded(
                                       child: Container(

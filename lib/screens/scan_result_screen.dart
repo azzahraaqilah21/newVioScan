@@ -242,6 +242,17 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
     _arcController.forward(from: 0);
   }
 
+  /// Keluar dari layar hasil. Hasil yang sudah disimpan baru dibersihkan di
+  /// sini (bukan saat Simpan) agar foto tetap terlihat, dan tidak tersimpan
+  /// dua kali saat layar ini dibuka lagi.
+  void _tinggalkanHasil() {
+    if (_isSaved) {
+      ref.read(latestHardwareResultProvider.notifier).clear();
+      ref.read(capturedImageProvider.notifier).clear();
+    }
+    widget.navigate('dashboard');
+  }
+
   Future<void> _saveResult() async {
     if (_isSaved || _isSaving) return;
     setState(() => _isSaving = true);
@@ -268,7 +279,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
         return;
       }
 
-      var model = hwResult
+      final model = hwResult
           // FIX: userId & info lesi dari form/auth WAJIB dipakai — sebelumnya
           // hasil hardware disimpan dengan userId 'local_patient' & lokasi
           // generik, sehingga riwayat/statistik user tidak pernah terisi.
@@ -279,38 +290,35 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
             clinicalRiskAssessment: clinicalData,
           );
 
-      // Simpan ke Firestore jika akun online terhubung
-      var fotoTerunggah = true;
-      if (user != null) {
-        // Unggah foto lesi agar ikut tampil di riwayat. Gagal unggah tidak
-        // membatalkan penyimpanan hasil.
-        final fotoBytes = model.rawImageBytes;
-        if (fotoBytes != null && model.fluorescenceImageUrl == null) {
-          try {
-            final url = await ref
-                .read(storageServiceProvider)
-                .uploadFluorescenceImage(user.uid, fotoBytes)
-                .timeout(const Duration(seconds: 30));
-            model = model.copyWith(fluorescenceImageUrl: url);
-          } catch (e) {
-            fotoTerunggah = false;
-            debugPrint('Upload foto gagal: $e');
-          }
-        }
+      // Foto ikut tersimpan di dokumen Firestore yang sama (lihat
+      // ScreeningModel.toMap) — tanpa Firebase Storage / paket Blaze.
+      final foto = model.rawImageBytes;
+      final fotoTersimpan =
+          foto == null || foto.length <= ScreeningModel.maxStoredImageBytes;
 
+      // Simpan ke Firestore jika akun online terhubung
+      if (user != null) {
         try {
           final firestoreService = ref.read(firestoreServiceProvider);
           await firestoreService.saveScreening(model);
         } catch (e) {
-          debugPrint('Firestore offline: $e');
+          debugPrint('Gagal menyimpan ke Firestore: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Gagal menyimpan ke cloud: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return; // _isSaved tetap false → user bisa mencoba lagi
         }
       }
 
-      // Clear in-progress form + hasil hardware (satu siklus screening selesai)
+      // Form selesai. Hasil alat & foto TETAP tampil di layar ini; baru
+      // dibersihkan saat user meninggalkan layar (_tinggalkanHasil).
       ref.read(lesionInfoProvider.notifier).clear();
       ref.read(clinicalAssessmentProvider.notifier).clear();
-      ref.read(latestHardwareResultProvider.notifier).clear();
-      ref.read(capturedImageProvider.notifier).clear();
 
       // Refresh stats jika online
       ref.invalidate(userStatsProvider);
@@ -327,9 +335,9 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                   child: Text(
                     user == null
                         ? 'Hasil berhasil disimpan secara lokal (Mode Offline)!'
-                        : fotoTerunggah
+                        : fotoTersimpan
                             ? 'Hasil berhasil disimpan ke database & cloud!'
-                            : 'Hasil tersimpan, tetapi foto lesi gagal diunggah.',
+                            : 'Hasil tersimpan, tetapi foto terlalu besar untuk disimpan.',
                   ),
                 ),
               ],
@@ -403,7 +411,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                       child: Row(
                         children: [
                         GestureDetector(
-                          onTap: () => widget.navigate('dashboard'),
+                          onTap: _tinggalkanHasil,
                           child: Container(
                             width: 40,
                             height: 40,
@@ -1454,7 +1462,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen>
                       Expanded(
                         flex: 2,
                         child: GestureDetector(
-                          onTap: () => widget.navigate('dashboard'),
+                          onTap: _tinggalkanHasil,
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             decoration: BoxDecoration(

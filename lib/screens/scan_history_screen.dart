@@ -116,7 +116,20 @@ class _ScanHistoryScreenState extends ConsumerState<ScanHistoryScreen>
                         fontSize: 12,
                         fontWeight: FontWeight.w700)),
               ],
-              if (imageUrl != null) ...[
+              if (s.rawImageBytes != null) ...[
+                // Foto tersimpan di dokumen Firestore (base64).
+                const SizedBox(height: 14),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.memory(
+                    s.rawImageBytes!,
+                    height: 200,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              ] else if (imageUrl != null) ...[
                 const SizedBox(height: 14),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(16),
