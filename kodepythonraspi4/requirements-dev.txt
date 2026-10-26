@@ -1,0 +1,24 @@
+# ============================================================================
+# BC-Care — Dependencies PC (untuk konversi model, BUKAN untuk Raspberry Pi)
+#
+# Jalankan ini di PC/laptop (Windows/Linux/Mac) yang punya TensorFlow, untuk
+# mengubah model .keras (Keras 3, format folder) menjadi model.tflite yang
+# efisien untuk Pi:
+#
+#   pip install -r requirements-dev.txt
+#   python export_to_tflite.py
+#
+# Hasil: model .tflite (augmentasi Random* sudah dilepas, input range 0-255,
+# sudah diverifikasi ekuivalen & deterministik) → deploy file .tflite saja ke
+# Pi. JANGAN menyalin file .keras ke Pi.
+#
+# Pi TIDAK butuh file ini — Pi cukup requirements.txt.
+#
+# CATATAN:
+#   • numpy TIDAK di-pin di sini — biarkan TensorFlow menarik versi yang
+#     kompatibel dengannya (TF ≥ 2.20 di Python 3.13 memakai numpy 2.x).
+#     Men-pin numpy<2.0 menyebabkan build dari sumber yang gagal tanpa MSVC.
+# ============================================================================
+
+tensorflow>=2.16        # Keras 3 loader untuk model .keras + TFLiteConverter
+Pillow>=9.0

@@ -1,0 +1,25 @@
+[Unit]
+Description=BC-Care Main Server (Bluetooth Classic SPP)
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+# Jalankan dari direktori tempat bccare_main.py berada agar path DB/capture
+# ($HOME/bccare_captures) konsisten dengan USER di bawah.
+WorkingDirectory=/home/padilkyun/kodepythonraspi4
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 /home/padilkyun/kodepythonraspi4/bccare_main.py
+Restart=on-failure
+RestartSec=3
+# PyBluez memakai SDP saat advertise_service; CAP_NET_RAW diperlukan pada
+# sebagian versi BlueZ agar record SPP dapat didaftarkan tanpa menjalankan root.
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+# dijalankan non-privileged; pastikan user ini punya akses ke /dev/gpiomem
+# dan grup video (kamera). Sesuaikan USER/GROUP dengan user login Pi.
+User=padilkyun
+Group=padilkyun
+
+[Install]
+WantedBy=multi-user.target

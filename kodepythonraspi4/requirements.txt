@@ -1,0 +1,80 @@
+# ============================================================================
+# BC-Care Raspberry Pi 4 — Python Dependencies (Runtime)
+#
+# Target : Raspberry Pi OS 64-bit (aarch64) — Bullseye (Python 3.9/3.10)
+#          ATAU Bookworm/Trixie (Python 3.11/3.13).
+#          bccare_db.py memakai sintaks `dict | None` yang dievaluasi saat
+#          import → Python >= 3.10 WAJIB (3.9 gagal).
+#
+# Cara pasang tercepat:
+#   bash install.sh
+#   (atau ikuti langkah manual di bawah)
+#
+# LANGKAH MANUAL
+# ── 1. Prasyarat sistem (APT — beberapa paket TIDAK tersedia via pip) ────────
+#   sudo apt update && sudo apt install -y \
+#       python3-venv python3-dev \
+#       python3-numpy python3-pil \
+#       python3-rpi.gpio \
+#       python3-picamera2 python3-libcamera
+#
+#     • python3-picamera2 : driver kamera. WAJIB via apt — versi pip butuh
+#       binding libcamera yang tidak ada di PyPI.
+#     • python3-rpi.gpio  : GPIO (LED iluminasi/indikator, HC-SR04, tombol).
+#
+# ── 2. Virtual environment yang tetap melihat paket apt ─────────────────────
+#   python3 -m venv --system-site-packages ~/bccare_venv
+#   source ~/bccare_venv/bin/activate
+#   pip install -r requirements.txt
+#
+# ── 3. Kamera ───────────────────────────────────────────────────────────────
+#   sudo raspi-config nonint do_camera 0
+#
+# ── 4. Paket perangkat keras (best-effort — jalankan terpisah agar kegagalannya
+#       tidak menggagalkan instalasi utama di atas) ──────────────────────────
+#   python3 -c "import RPi.GPIO" 2>/dev/null || pip install RPi.GPIO
+#                                        # fallback apt sudah via --system-site-packages
+#   # Jika RPi.GPIO gagal build di Python 3.13:
+#   #   pip install rpi-lgpio            # shim API-compatible
+#
+# CATATAN PENTING
+#   • Transport ke Android = Bluetooth Classic SPP (RFCOMM).
+#     Pasang binding sistem pada Raspberry Pi: sudo apt install python3-bluez
+#   • Python 3.13 (Trixie): tidak ada wheel tflite-runtime → jalur TF penuh
+#     dipilih otomatis (marker di bawah). Unduhan besar (~200 MB+) tapi
+#     sekalian membuka fallback pemuatan model .keras (Keras 3) bila .tflite
+#     belum di-deploy.
+#   • Jangan deploy file model .keras ke Pi — pakai .tflite hasil
+#     export_to_tflite.py (jalankan di PC, lihat requirements-dev.txt).
+# ============================================================================
+
+# ── Dasar ────────────────────────────────────────────────────────────────────
+# Bullseye (jalur tflite-runtime dibangun di atas ABI numpy 1.x) → numpy<2.
+# Python 3.11+ → numpy modern; pip resolver memilih versi yang cocok dengan TF.
+numpy>=1.23,<2.0 ; python_version < "3.11"
+numpy>=1.26 ; python_version >= "3.11"
+Pillow>=9.0
+
+# ── Inferensi ML (bccare_ml.py): kode otomatis memilih jalur yang ada ───────
+#
+# Jalur A — Bullseye (Python < 3.11): TFLite Runtime (ringan ~5 MB).
+tflite-runtime>=2.10 ; python_version < "3.11"
+
+# Jalur B — Python >= 3.11: TensorFlow penuh. TANPA batas atas: wheel cp313
+# baru mulai dari TF 2.20, jadi pin "<2.18" akan gagal build dari sumber.
+# TF >= 2.16 menerbitkan wheel linux_aarch64 resmi di PyPI.
+tensorflow>=2.16 ; python_version >= "3.11"
+
+# ── GPIO TIDAK di sini ───────────────────────────────────────────────────────
+# Sengaja tidak masuk requirements: jika build-nya gagal (mis. RPi.GPIO di
+# Python 3.13), `pip install -r` akan berhenti sebelum selesai. install.sh
+# memasangnya secara best-effort sebagai langkah terpisah. Contoh manual:
+#   pip install RPi.GPIO ; platform_machine == "aarch64"
+
+# picamera2 TIDAK dipasang via pip — gunakan apt python3-picamera2 (lihat atas).
+
+# Catatan Pi 5 (bukan target saat ini): RPi.GPIO tidak bekerja di Pi 5.
+#   pip install rpi-lgpio     # shim API-compatible pengganti RPi.GPIO
+
+# Tidak perlu di-install (stdlib): sqlite3, json, base64, threading,
+# tempfile, zipfile, subprocess, time, os, sys

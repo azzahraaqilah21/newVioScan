@@ -1,0 +1,48 @@
+{
+    "project_info": {
+        "project_number": "476553451524",
+        "project_id": "vioscan-bc-care",
+        "storage_bucket": "vioscan-bc-care.firebasestorage.app"
+    },
+    "client": [{
+        "client_info": {
+            "mobilesdk_app_id": "1:476553451524:android:83fcf48949eebf3151fd51",
+            "android_client_info": {
+                "package_name": "com.vioscan.vioscan_flutter"
+            }
+        },
+        "oauth_client": [{
+                "client_id": "476553451524-jheof03ffp1f3gok9a0nj80nrl8oivd0.apps.googleusercontent.com",
+                "client_type": 1,
+                "android_info": {
+                    "package_name": "com.vioscan.vioscan_flutter",
+                    "certificate_hash": "287f60c433e2b50786ce4ae85123c3a5628bcc73"
+                }
+            },
+            {
+                "client_id": "476553451524-pepf525sk3jp7d8c6ofb6tqn4fld28p4.apps.googleusercontent.com",
+                "client_type": 3
+            }
+        ],
+        "api_key": [{
+            "current_key": "AIzaSyBauyg8fH7ZbbbRV1EWBaCJ3bb5uy_bSXc"
+        }],
+        "services": {
+            "appinvite_service": {
+                "other_platform_oauth_client": [{
+                        "client_id": "476553451524-pepf525sk3jp7d8c6ofb6tqn4fld28p4.apps.googleusercontent.com",
+                        "client_type": 3
+                    },
+                    {
+                        "client_id": "476553451524-ufgs9dlmqdlramq7prpudrm9acs325co.apps.googleusercontent.com",
+                        "client_type": 2,
+                        "ios_info": {
+                            "bundle_id": "com.vioscan.vioscanFlutter"
+                        }
+                    }
+                ]
+            }
+        }
+    }],
+    "configuration_version": "1"
+}
