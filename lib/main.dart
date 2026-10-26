@@ -93,7 +93,7 @@ class VioScanApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'VioScan BC-Care',
+      title: 'Vio Scan',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         fontFamily: 'sans-serif',
