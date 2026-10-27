@@ -34,7 +34,7 @@ CARA PAKAI (di PC/laptop dengan TensorFlow, bukan di Raspberry Pi):
 
 Output:
     bccare_dermoscopy.tflite   (dari BCCare_Dermoscopy_EfficientNetB3.keras)
-    bccare_fluorescence.tflite (dari best_fluorescence_model.keras)
+    bccare_fluorescence.tflite (dari bccare_fluorescence_efficientnetb3.keras)
 """
 
 import os
@@ -376,7 +376,9 @@ def _conversion_strategies(model, workdir):
 
 def _convert_builtin_only(converter):
     import tensorflow as tf
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    # TANPA optimizations (kuantisasi int8): diuji 27 Okt pada model UV baru,
+    # versi terkuantisasi hanya 6/14 keputusan sama dengan Keras; float32
+    # (tanpa kuantisasi) 14/14.
     # BUILTINS SAJA — sengaja TANPA SELECT_TF_OPS. Model Flex tidak bisa jalan
     # di tflite_runtime Pi, jadi lebih baik konversi gagal keras di sini.
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
@@ -494,7 +496,7 @@ def convert_keras_to_tflite(verify=True):
         },
         {
             "name": "UV-Fluorescence",
-            "keras": os.path.join(base_dir, "best_fluorescence_model.keras"),
+            "keras": os.path.join(base_dir, "bccare_fluorescence_efficientnetb3.keras"),
             "tflite": os.path.join(base_dir, "bccare_fluorescence.tflite")
         }
     ]

@@ -29,7 +29,7 @@ from PIL import Image
 # Default directory model
 MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 DERMOSCOPY_KERAS = os.path.join(MODEL_DIR, "BCCare_Dermoscopy_EfficientNetB3.keras")
-FLUORESCENCE_KERAS = os.path.join(MODEL_DIR, "best_fluorescence_model.keras")
+FLUORESCENCE_KERAS = os.path.join(MODEL_DIR, "bccare_fluorescence_efficientnetb3.keras")
 
 DERMOSCOPY_TFLITE = os.path.join(MODEL_DIR, "bccare_dermoscopy.tflite")
 FLUORESCENCE_TFLITE = os.path.join(MODEL_DIR, "bccare_fluorescence.tflite")
