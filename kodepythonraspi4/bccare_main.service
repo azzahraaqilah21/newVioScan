@@ -11,6 +11,9 @@ User=tes
 Group=tes
 WorkingDirectory=/mnt/data/backup-pi/kodepythonraspi4
 Environment=PYTHONUNBUFFERED=1
+# Library Python user (ai-edge-litert dll.) disimpan di SD card, bukan di
+# home flashdisk boot - supaya tetap jalan meski flashdisk boot diganti.
+Environment=PYTHONUSERBASE=/mnt/data/backup-pi/.local
 # Tunggu adapter Bluetooth muncul (maks 30 dtk) agar server tidak start
 # sebelum hci0 siap saat boot. Tanda "-" = gagal pun tetap lanjut.
 ExecStartPre=-/usr/bin/timeout 30 /bin/sh -c 'until bluetoothctl show 2>/dev/null | grep -q Controller; do sleep 1; done'
